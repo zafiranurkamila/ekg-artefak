@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -131,18 +132,8 @@ class _LayarState extends State<Layar> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        backgroundColor: const Color(0xFFF7F8F7),
-        appBar: AppBar(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.white,
-          elevation: 0,
-          titleSpacing: 16,
-          title: const Text('Deteksi Artefak EKG',
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: tinta)),
-          bottom: const PreferredSize(
-              preferredSize: Size.fromHeight(1), child: Divider(height: 1, color: Color(0xFFEDEFEE))),
-        ),
-        body: _beranda(),
+        backgroundColor: const Color(0xFFEFF3F1),
+        body: SafeArea(child: _beranda()),
       );
 
   Widget _judul(String t, [Widget? ekor]) => Padding(
@@ -160,181 +151,267 @@ class _LayarState extends State<Layar> {
     final persenBersih = durasi == 0 ? 0.0 : (1 - durArt / durasi).clamp(0.0, 1.0);
     String statusHr(double v) => v == 0 ? '-' : (v < 60 ? 'Rendah' : (v > 100 ? 'Tinggi' : 'Normal'));
     String ada(int n) => n == 0 ? 'Normal' : 'Perlu perhatian';
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 28), children: [
-      // rekaman
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: kartu(),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Rekaman', style: TextStyle(color: redup, fontSize: 12.5)),
-          const SizedBox(height: 2),
-          Text(_nama, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: tinta)),
-          Text(_info, style: const TextStyle(color: redup, fontSize: 13)),
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(
-              child: FilledButton(
-                style: FilledButton.styleFrom(
-                    backgroundColor: zaitun, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                onPressed: _muat,
-                child: const Text('Muat rekaman'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton(
-                style: OutlinedButton.styleFrom(
-                    foregroundColor: zaitun,
-                    side: const BorderSide(color: zaitun),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                onPressed: _contoh,
-                child: const Text('Pakai contoh'),
-              ),
-            ),
-          ]),
-        ]),
-      ),
-      const SizedBox(height: 12),
 
-      // kualitas sinyal + saklar model
-      Container(
-        padding: const EdgeInsets.all(16),
-        decoration: kartu(),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            const Expanded(child: Text('Kualitas sinyal', style: TextStyle(fontWeight: FontWeight.w700, color: tinta))),
-            Text('${(persenBersih * 100).round()}% bersih', style: const TextStyle(fontWeight: FontWeight.w700, color: zaitun)),
-          ]),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: LinearProgressIndicator(
-                value: persenBersih, minHeight: 8, color: zaitun, backgroundColor: const Color(0xFFF2BDBD)),
+    // persentase bersih per blok 2 detik untuk grafik batang
+    final blok = durasi > 40 ? 10.0 : 2.0;
+    final batang = <double>[];
+    for (var t = 0.0; t < durasi - 1e-9; t += blok) {
+      final z = min(durasi, t + blok);
+      var kotor = 0.0;
+      for (final a in _h.artefak) {
+        kotor += max(0.0, min(z, a.selesai) - max(t, a.mulai));
+      }
+      batang.add(1 - kotor / (z - t));
+    }
+
+    return ListView(padding: const EdgeInsets.fromLTRB(20, 18, 20, 32), children: [
+      // kepala: judul besar + tombol bulat
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Expanded(
+          child: Text('Pemeriksaan\nEKG', style: TextStyle(fontSize: 28, height: 1.15, fontWeight: FontWeight.w800, color: hijauGelap)),
+        ),
+        _TombolBulat(ikon: Icons.upload_file_rounded, onTap: _muat),
+      ]),
+      const SizedBox(height: 14),
+      Row(children: [
+        Expanded(
+          child: Text('$_nama · $_info', style: const TextStyle(color: redup, fontSize: 13), overflow: TextOverflow.ellipsis),
+        ),
+        _Pil(teks: 'Contoh', onTap: _contoh),
+      ]),
+      const SizedBox(height: 26),
+
+      // kualitas sinyal: angka besar + batang per blok
+      Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+        const Expanded(child: Text('Kualitas sinyal', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: hijauGelap))),
+        Text('${(persenBersih * 100).round()}%', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: zaitun)),
+      ]),
+      const SizedBox(height: 14),
+      SizedBox(height: 150, child: CustomPaint(painter: _Batang(batang, persenBersih), size: Size.infinite)),
+      const SizedBox(height: 8),
+      Row(children: [
+        for (var i = 0; i < batang.length; i++)
+          Expanded(
+            child: Center(
+              child: Text('${(i * blok).toStringAsFixed(0)}s', style: const TextStyle(fontSize: 10.5, color: redup)),
+            ),
           ),
-          const SizedBox(height: 8),
-          Text('${_h.artefak.length} segmen artefak, ${durArt.toStringAsFixed(1)} dari ${durasi.toStringAsFixed(0)} detik',
-              style: const TextStyle(color: redup, fontSize: 12.5)),
-          const Divider(height: 24, color: Color(0xFFEDEFEE)),
-          Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Bersihkan dengan model CDAE', style: TextStyle(fontWeight: FontWeight.w600, color: tinta)),
-                Text(
-                    _model.isEmpty
-                        ? 'Memuat model...'
-                        : (_pakaiModel ? 'Artefak dibersihkan lalu ikut dihitung' : 'Artefak dibuang dari perhitungan'),
-                    style: const TextStyle(color: redup, fontSize: 12)),
-              ]),
-            ),
-            Switch(
-              value: _pakaiModel,
-              activeTrackColor: zaitun,
-              onChanged: _model.isEmpty
-                  ? null
-                  : (v) => setState(() {
-                        _pakaiModel = v;
-                        _hitung();
-                      }),
-            ),
-          ]),
-        ]),
-      ),
+      ]),
+      const SizedBox(height: 26),
+
+      // tiga kotak hasil utama
+      const Center(child: Text('Hasil utama', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: hijauGelap))),
       const SizedBox(height: 12),
+      Row(children: [
+        _Kotak(warna: const Color(0xFFDDEFE3), judul: 'Detak\njantung', nilai: '${s.hrRata.round()}', satuan: 'bpm'),
+        const SizedBox(width: 10),
+        _Kotak(warna: const Color(0xFFE6F2EA), judul: 'PVC', nilai: '${_h.hitung('PVC')}', satuan: 'beat'),
+        const SizedBox(width: 10),
+        _Kotak(warna: const Color(0xFFEFF6F1), judul: 'PAC', nilai: '${_h.hitung('PAC')}', satuan: 'beat'),
+      ]),
+      const SizedBox(height: 22),
 
       // grafik
       Container(
-        padding: const EdgeInsets.fromLTRB(8, 14, 8, 8),
-        decoration: kartu(),
+        padding: const EdgeInsets.fromLTRB(10, 16, 10, 10),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Padding(
-            padding: EdgeInsets.only(left: 8, bottom: 8),
-            child: Text('Sinyal EKG', style: TextStyle(fontWeight: FontWeight.w700, color: tinta)),
+            padding: EdgeInsets.only(left: 8, bottom: 10),
+            child: Text('Sinyal EKG', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: hijauGelap)),
           ),
           AspectRatio(aspectRatio: 1.45, child: CustomPaint(painter: Grafik(_h))),
         ]),
       ),
-      const SizedBox(height: 20),
+      const SizedBox(height: 12),
 
-      // hasil pemeriksaan
-      const Padding(
-        padding: EdgeInsets.only(left: 4, bottom: 8),
-        child: Text('Hasil Pemeriksaan', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: tinta)),
-      ),
+      // saklar model
       Container(
-        decoration: kartu(),
-        child: Column(children: [
-          _Hasil('Rata-rata detak jantung', '${s.hrRata.round()} bpm', statusHr(s.hrRata)),
-          _Hasil('Detak tertinggi', '${s.hrMax.round()} bpm', statusHr(s.hrMax)),
-          _Hasil('Detak terendah', '${s.hrMin.round()} bpm', statusHr(s.hrMin)),
-          _Hasil('Takikardia (> 100 bpm)', '${s.tachy} interval · ${s.persenTachy.toStringAsFixed(0)}%', ada(s.tachy)),
-          _Hasil('Bradikardia (< 60 bpm)', '${s.brady} interval · ${s.persenBrady.toStringAsFixed(0)}%', ada(s.brady)),
-          _Hasil('PVC', '${_h.hitung('PVC')} beat', ada(_h.hitung('PVC'))),
-          _Hasil('PAC', '${_h.hitung('PAC')} beat', ada(_h.hitung('PAC')), terakhir: true),
+        padding: const EdgeInsets.fromLTRB(20, 12, 12, 12),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28)),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Bersihkan dengan model CDAE', style: TextStyle(fontWeight: FontWeight.w700, color: hijauGelap)),
+              const SizedBox(height: 2),
+              Text(
+                  _model.isEmpty
+                      ? 'Memuat model...'
+                      : (_pakaiModel ? 'Artefak dibersihkan lalu ikut dihitung' : 'Artefak dibuang dari perhitungan'),
+                  style: const TextStyle(color: redup, fontSize: 12)),
+            ]),
+          ),
+          Switch(
+            value: _pakaiModel,
+            activeTrackColor: zaitun,
+            onChanged: _model.isEmpty
+                ? null
+                : (v) => setState(() {
+                      _pakaiModel = v;
+                      _hitung();
+                    }),
+          ),
         ]),
       ),
+      const SizedBox(height: 26),
+
+      // detail
+      const Text('Detail pemeriksaan', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: hijauGelap)),
+      const SizedBox(height: 12),
+      _Baris('Rata-rata detak jantung', '${s.hrRata.round()} bpm', statusHr(s.hrRata)),
+      _Baris('Detak tertinggi', '${s.hrMax.round()} bpm', statusHr(s.hrMax)),
+      _Baris('Detak terendah', '${s.hrMin.round()} bpm', statusHr(s.hrMin)),
+      _Baris('Takikardia (> 100 bpm)', '${s.tachy} interval · ${s.persenTachy.toStringAsFixed(0)}%', ada(s.tachy)),
+      _Baris('Bradikardia (< 60 bpm)', '${s.brady} interval · ${s.persenBrady.toStringAsFixed(0)}%', ada(s.brady)),
       Padding(
-        padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+        padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
         child: Text('Dihitung dari ${s.totalBeat} detak dan ${s.jumlahInterval} interval R-R. Hasil ini bukan diagnosis.',
             style: const TextStyle(color: redup, fontSize: 11.5)),
       ),
-      const SizedBox(height: 20),
+      const SizedBox(height: 26),
 
       // segmen artefak
-      const Padding(
-        padding: EdgeInsets.only(left: 4, bottom: 8),
-        child: Text('Segmen Artefak', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: tinta)),
-      ),
-      Container(
-        decoration: kartu(),
-        child: Column(children: [
-          if (_h.artefak.isEmpty)
-            const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('Tidak ada artefak. Seluruh rekaman dihitung.', style: TextStyle(color: tinta))),
-          for (final (i, a) in _h.artefak.indexed)
-            _Hasil(
-              'Segmen ${i + 1}',
-              '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik',
-              _h.dibersihkan ? 'Dibersihkan ${(_h.modelPerSegmen[i] ?? '').toUpperCase()}' : 'Dibuang',
-              netral: true,
-              terakhir: i == _h.artefak.length - 1,
-            ),
-        ]),
-      ),
+      const Text('Segmen artefak', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: hijauGelap)),
+      const SizedBox(height: 12),
+      if (_h.artefak.isEmpty) const _Baris('Tidak ada artefak', 'Seluruh rekaman dihitung', '-'),
+      for (final (i, a) in _h.artefak.indexed)
+        _Baris(
+          'Segmen ${i + 1}',
+          '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik',
+          _h.dibersihkan ? 'Dibersihkan ${(_h.modelPerSegmen[i] ?? '').toUpperCase()}' : 'Dibuang',
+          netral: true,
+        ),
     ]);
   }
 }
 
-class _Hasil extends StatelessWidget {
+const hijauGelap = Color(0xFF0F3D2A);
+
+class _TombolBulat extends StatelessWidget {
+  final IconData ikon;
+  final VoidCallback onTap;
+  const _TombolBulat({required this.ikon, required this.onTap});
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Colors.white,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: SizedBox(width: 54, height: 54, child: Icon(ikon, color: hijauGelap)),
+        ),
+      );
+}
+
+class _Pil extends StatelessWidget {
+  final String teks;
+  final VoidCallback onTap;
+  const _Pil({required this.teks, required this.onTap});
+  @override
+  Widget build(BuildContext context) => Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(teks, style: const TextStyle(color: hijauGelap, fontWeight: FontWeight.w600, fontSize: 13)),
+          ),
+        ),
+      );
+}
+
+class _Kotak extends StatelessWidget {
+  final Color warna;
+  final String judul, nilai, satuan;
+  const _Kotak({required this.warna, required this.judul, required this.nilai, required this.satuan});
+  @override
+  Widget build(BuildContext context) => Expanded(
+        child: Container(
+          height: 128,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: warna, borderRadius: BorderRadius.circular(28)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(judul, style: const TextStyle(color: hijauGelap, fontSize: 13, fontWeight: FontWeight.w600, height: 1.2)),
+            const Spacer(),
+            Text(nilai, style: const TextStyle(color: hijauGelap, fontSize: 30, fontWeight: FontWeight.w800, height: 1)),
+            Text(satuan, style: const TextStyle(color: redup, fontSize: 12)),
+          ]),
+        ),
+      );
+}
+
+class _Baris extends StatelessWidget {
   final String label, nilai, status;
-  final bool terakhir, netral;
-  const _Hasil(this.label, this.nilai, this.status, {this.terakhir = false, this.netral = false});
+  final bool netral;
+  const _Baris(this.label, this.nilai, this.status, {this.netral = false});
   @override
   Widget build(BuildContext context) {
     final baik = status == 'Normal';
-    final bg = netral ? const Color(0xFFF1F3F2) : (baik ? zaitunMuda : const Color(0xFFFDECEA));
+    final bg = netral ? const Color(0xFFF1F4F2) : (baik ? const Color(0xFFDDEFE3) : const Color(0xFFFBE9E7));
     final fg = netral ? redup : (baik ? zaitun : const Color(0xFFB3261E));
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-      decoration:
-          BoxDecoration(border: terakhir ? null : const Border(bottom: BorderSide(color: Color(0xFFEDEFEE)))),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
       child: Row(children: [
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: const TextStyle(color: redup, fontSize: 12.5)),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w700, color: hijauGelap, fontSize: 14)),
             const SizedBox(height: 2),
-            Text(nilai, style: const TextStyle(fontWeight: FontWeight.w700, color: tinta, fontSize: 15)),
+            Text(nilai, style: const TextStyle(color: redup, fontSize: 13)),
           ]),
         ),
         if (status != '-')
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
             child: Text(status, style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 12)),
           ),
       ]),
     );
   }
+}
+
+/// Grafik batang: persentase sinyal bersih per blok 2 detik, dengan garis rata-rata.
+class _Batang extends CustomPainter {
+  final List<double> nilai;
+  final double rata;
+  _Batang(this.nilai, this.rata);
+
+  @override
+  void paint(Canvas c, Size size) {
+    if (nilai.isEmpty) return;
+    const atas = 26.0;
+    final lebar = size.width / nilai.length;
+    final ht = size.height - atas;
+    for (var i = 0; i < nilai.length; i++) {
+      final h = max(6.0, nilai[i] * ht);
+      final r = RRect.fromRectAndRadius(
+          Rect.fromLTWH(i * lebar + lebar * 0.12, size.height - h, lebar * 0.76, h), const Radius.circular(8));
+      c.drawRRect(r, Paint()..color = nilai[i] >= 0.999 ? const Color(0xFF1E6B45) : const Color(0xFFD3DCD7));
+    }
+    // garis rata-rata putus-putus + label gelap
+    final y = size.height - rata * ht;
+    for (var x = 0.0; x < size.width; x += 6) {
+      c.drawLine(Offset(x, y), Offset(x + 3, y), Paint()
+        ..color = const Color(0xFF0F3D2A)
+        ..strokeWidth = 1);
+    }
+    final tp = TextPainter(
+        text: TextSpan(
+            text: 'Rata-rata ${(rata * 100).round()}%',
+            style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w600)),
+        textDirection: TextDirection.ltr)
+      ..layout();
+    final kotak = RRect.fromRectAndRadius(Rect.fromLTWH(0, y - tp.height - 10, tp.width + 14, tp.height + 6), const Radius.circular(10));
+    c.drawRRect(kotak, Paint()..color = const Color(0xFF0F3D2A));
+    tp.paint(c, Offset(7, y - tp.height - 7));
+  }
+
+  @override
+  bool shouldRepaint(covariant _Batang old) => old.nilai != nilai || old.rata != rata;
 }
 
 class _TombolPil extends StatelessWidget {
