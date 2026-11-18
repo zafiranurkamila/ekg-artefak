@@ -25,7 +25,42 @@ class HasilAnalisis {
   final List<Segmen> artefak;
   final List<int> puncakR; // indeks sampel, hanya di bagian bersih
   final Statistik stat;
-  const HasilAnalisis(this.sinyal, this.fs, this.artefak, this.puncakR, this.stat);
+  final List<String> jenisBeat; // 'N', 'PVC', atau 'PAC' untuk tiap puncak R
+  const HasilAnalisis(this.sinyal, this.fs, this.artefak, this.puncakR, this.stat, this.jenisBeat);
+  int hitung(String j) => jenisBeat.where((e) => e == j).length;
+}
+
+/// Klasifikasi beat berbasis aturan (sementara, sebelum model AI dipasang):
+/// - PVC: QRS lebar (>= 100 ms), biasanya datang lebih awal.
+/// - PAC: datang lebih awal (R-R < 80% median) dengan QRS normal.
+List<String> klasifikasiBeat(List<double> x, double fs, List<int> r) {
+  final rr = <double>[for (var i = 1; i < r.length; i++) (r[i] - r[i - 1]) / fs];
+  final urut = [...rr]..sort();
+  final median = urut.isEmpty ? 1.0 : urut[urut.length ~/ 2];
+  final w = (0.12 * fs).round();
+  return [
+    for (var k = 0; k < r.length; k++)
+      () {
+        final i = r[k];
+        final a = max(0, i - w), z = min(x.length, i + w);
+        // garis dasar lokal: median 0,3 s sebelum QRS
+        final pra = x.sublist(max(0, i - (0.3 * fs).round()), max(1, i - (0.1 * fs).round()))..sort();
+        final dasar = pra.isEmpty ? 0.0 : pra[pra.length ~/ 2];
+        final ambang = 0.25 * (x[i] - dasar).abs();
+        int? awal, akhir;
+        for (var j = a; j < z; j++) {
+          if ((x[j] - dasar).abs() > ambang) {
+            awal ??= j;
+            akhir = j;
+          }
+        }
+        final lebarMs = awal == null ? 0 : (akhir! - awal) / fs * 1000;
+        final awalBeat = k > 0 && rr[k - 1] < 0.8 * median;
+        if (lebarMs >= 100) return 'PVC';
+        if (awalBeat) return 'PAC';
+        return 'N';
+      }()
+  ];
 }
 
 /// Titik sambung untuk model aritmia (mis. model Zaskia).
@@ -232,7 +267,7 @@ HasilAnalisis analisis(List<double> x, double fs) {
     }
     awal = sg.selesai;
   }
-  return HasilAnalisis(x, fs, art, r, hitungStatistik(r, fs, art));
+  return HasilAnalisis(x, fs, art, r, hitungStatistik(r, fs, art), klasifikasiBeat(x, fs, r));
 }
 
 /// Baca CSV satu kolom (amplitudo) atau dua kolom (waktu, amplitudo).

@@ -12,6 +12,7 @@ const oranye = Color(0xFFE07B39);
 const merahLembut = Color(0xFFF6D3CC);
 const tinta = Color(0xFF2B2B22);
 const redup = Color(0xFF7A7A6E);
+const warnaBeat = {'N': Color(0xFF3C7DBF), 'PVC': Color(0xFFD9481E), 'PAC': Color(0xFF8A4FBF)};
 
 void main() => runApp(MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -178,12 +179,16 @@ class _LayarState extends State<Layar> {
         child: Column(children: [
           AspectRatio(aspectRatio: 1.75, child: CustomPaint(painter: Grafik(_h))),
           const SizedBox(height: 8),
-          const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Wrap(alignment: WrapAlignment.center, runSpacing: 4, children: [
             _Titik(warna: Color(0xFFF2B8AC), teks: 'Artefak'),
             SizedBox(width: 14),
             _Titik(warna: Color(0xFFDCE6C6), teks: 'Bersih'),
             SizedBox(width: 14),
-            _Titik(warna: Color(0xFF3C7DBF), teks: 'Puncak R'),
+            _Titik(warna: Color(0xFF3C7DBF), teks: 'Normal'),
+            SizedBox(width: 14),
+            _Titik(warna: Color(0xFFD9481E), teks: 'PVC'),
+            SizedBox(width: 14),
+            _Titik(warna: Color(0xFF8A4FBF), teks: 'PAC'),
           ]),
         ]),
       ),
@@ -211,6 +216,16 @@ class _LayarState extends State<Layar> {
                     label: 'Taki / Bradi',
                     nilai: '${s.persenTachy.toStringAsFixed(0)}% / ${s.persenBrady.toStringAsFixed(0)}%')),
           ]),
+        ]),
+      ),
+      const SizedBox(height: 18),
+      _judul('Aritmia', const Text('aturan klinis · model AI menyusul', style: TextStyle(color: redup, fontSize: 12))),
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: kartu(),
+        child: Row(children: [
+          Expanded(child: _Detail(ikon: Icons.bolt_rounded, label: 'PVC', nilai: '${_h.hitung('PVC')} beat')),
+          Expanded(child: _Detail(ikon: Icons.timelapse_rounded, label: 'PAC', nilai: '${_h.hitung('PAC')} beat')),
         ]),
       ),
       const SizedBox(height: 18),
@@ -444,10 +459,12 @@ class Grafik extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.9
       ..color = tinta);
-    final biru = Paint()..color = const Color(0xFF3C7DBF);
-    for (final i in h.puncakR) {
+    for (final (k, i) in h.puncakR.indexed) {
+      final j = h.jenisBeat[k];
       final x = px(i / h.fs), y = py(h.sinyal[i]) - 3;
-      c.drawPath(Path()..moveTo(x - 4, y - 7)..lineTo(x + 4, y - 7)..lineTo(x, y)..close(), biru);
+      c.drawPath(Path()..moveTo(x - 4, y - 7)..lineTo(x + 4, y - 7)..lineTo(x, y)..close(),
+          Paint()..color = warnaBeat[j]!);
+      if (j != 'N') _teks(c, j, Offset(x, y - 19), 8, warnaBeat[j]!, bold: true, tengah: true);
     }
     c.restore();
     for (var t = 0.0; t <= durasi + 1e-9; t += langkahGrid) {
