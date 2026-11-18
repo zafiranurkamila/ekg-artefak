@@ -35,12 +35,14 @@ abstract class ModelAritmia {
 }
 
 // ---------------------------------------------------------------- sinyal contoh
+/// Sinyal contoh yang meniru rekaman nyata: sinus lambat, PVC di akhir,
+/// artefak gerak (1,1-4,0 s), artefak otot/elektroda (13,6-15,5 s),
+/// dan baseline wander yang turun (15,3-16,6 s).
 List<double> sinyalContoh({double fs = 250, double durasi = 20, int seed = 7}) {
   final r = Random(seed);
   final n = (fs * durasi).round();
   final x = List<double>.filled(n, 0);
   double g(double t, double c, double w, double a) => a * exp(-pow((t - c) / w, 2));
-  // detak: sebagian lambat (bradikardia), satu PVC lebar
   final beats = <double>[0.25, 1.05, 1.9, 2.7, 3.5, 4.25, 5.05, 5.85, 7.3, 8.65, 10.0,
       11.3, 12.65, 16.7, 17.15, 17.6, 18.1, 18.95];
   for (final b in beats) {
@@ -48,67 +50,98 @@ List<double> sinyalContoh({double fs = 250, double durasi = 20, int seed = 7}) {
     for (var i = 0; i < n; i++) {
       final t = i / fs;
       if ((t - b).abs() > 0.6) continue;
-      if (pvc) {
-        x[i] += g(t, b, 0.03, 1.7) - g(t, b + 0.08, 0.05, 0.8) - g(t, b + 0.3, 0.08, 0.5);
-      } else {
-        x[i] += g(t, b - 0.18, 0.03, 0.12) + g(t, b, 0.012, 1.5) -
-            g(t, b + 0.03, 0.012, 0.25) + g(t, b + 0.25, 0.05, 0.3);
-      }
+      x[i] += pvc
+          ? g(t, b, 0.03, 1.7) - g(t, b + 0.08, 0.05, 0.8) - g(t, b + 0.3, 0.08, 0.5)
+          : g(t, b - 0.18, 0.03, 0.12) + g(t, b, 0.012, 1.5) - g(t, b + 0.03, 0.012, 0.25) + g(t, b + 0.25, 0.05, 0.3);
     }
   }
+  // noise acak yang sedikit dihaluskan supaya mirip rekaman, bukan putih murni
+  List<double> acak(double amp, int halus) {
+    final v = List<double>.generate(n, (_) => (r.nextDouble() - .5) * 2 * amp);
+    final o = List<double>.filled(n, 0);
+    for (var i = 0; i < n; i++) {
+      var s = 0.0, c = 0;
+      for (var k = max(0, i - halus); k <= min(n - 1, i + halus); k++) {
+        s += v[k];
+        c++;
+      }
+      o[i] = s / c;
+    }
+    return o;
+  }
+
+  final hf = acak(2.2, 1), mf = acak(3.0, 4);
+  double jendela(double t, double a, double z) =>
+      t < a || t > z ? 0 : pow(max(0.0, sin(pi * (t - a) / (z - a))), 0.3).toDouble();
   for (var i = 0; i < n; i++) {
     final t = i / fs;
-    x[i] += 0.02 * (r.nextDouble() - .5);
-    if (t > 1.2 && t < 4.0) x[i] += 1.4 * (r.nextDouble() - .5) * 2 + (t > 2.5 ? -1.2 : 0.8); // gerak
-    if (t > 13.6 && t < 15.5) x[i] += 2.6 * (r.nextDouble() - .5) * 2; // otot/elektroda
-    if (t > 15.0 && t < 16.6) x[i] += 1.6 * sin(pi * (t - 15.0) / 3.2) - 2.2 * max(0, t - 15.9); // drift
+    x[i] += 0.015 * (r.nextDouble() - .5);
+    // artefak gerak: naik lalu turun, dengan noise frekuensi tinggi
+    final wg = jendela(t, 1.1, 4.0);
+    if (wg > 0) x[i] += wg * (0.55 * hf[i] + 0.25 * mf[i] + 1.1 * sin(pi * (t - 1.1) / 1.45) - 0.4);
+    // artefak otot/elektroda lepas
+    final wo = jendela(t, 13.6, 15.5);
+    if (wo > 0) x[i] += wo * (0.9 * hf[i] + 0.3 * mf[i]);
+    // baseline wander: naik pelan lalu turun tajam, halus
+    final wd = jendela(t, 15.3, 16.6);
+    if (wd > 0) x[i] += wd * (1.4 * sin(pi * (t - 15.3) / 1.3) * (1 - (t - 15.3) / 1.3) - 2.0 * pow((t - 15.3) / 1.3, 3) + 0.08 * hf[i]);
   }
   return x;
 }
 
 // ---------------------------------------------------------------- artefak
-/// Jendela 0,5 s. Jendela dianggap artefak bila energi turunan (frekuensi tinggi)
-/// atau rentang amplitudo jauh di atas median sinyal, atau baseline bergeser.
-/// Jendela artefak yang berdekatan digabung, lalu dibulatkan ke blok [blok] detik
-/// supaya mulai/selesai artefak jelas seperti pada grafik referensi.
-List<Segmen> deteksiArtefak(List<double> x, double fs, {double blok = 2.0}) {
-  final w = (0.5 * fs).round();
-  final jml = x.length ~/ w;
-  final energi = <double>[], rentang = <double>[], baseline = <double>[];
-  for (var k = 0; k < jml; k++) {
-    final p = x.sublist(k * w, (k + 1) * w);
-    var e = 0.0;
-    for (var i = 1; i < p.length; i++) {
-      e += pow(p[i] - p[i - 1], 2);
+/// Deteksi waktu mulai dan selesai artefak dengan resolusi 0,1 detik.
+/// Jendela 0,25 s digeser tiap 0,1 s, dianggap noise bila:
+/// - banyak titik balik besar (noise gerak/otot; QRS normal hanya 3-4 titik balik), atau
+/// - garis dasar (median) menyimpang jauh dari garis dasar global (baseline wander).
+/// Bagian noise yang berjarak < 0,4 s digabung, lalu diberi jarak aman 0,15 s.
+List<Segmen> deteksiArtefak(List<double> x, double fs) {
+  final n = x.length;
+  final w = (0.25 * fs).round(), hop = (0.1 * fs).round();
+  final glob = ([...x]..sort())[n ~/ 2];
+  final ambangLangkah = 0.08; // mV per sampel pada 250 Hz
+  final tandai = List<bool>.filled(n, false);
+  for (var a = 0; a + w <= n; a += hop) {
+    var balik = 0;
+    var arahLalu = 0;
+    for (var i = a + 1; i < a + w; i++) {
+      final dlt = x[i] - x[i - 1];
+      if (dlt.abs() < ambangLangkah * 250 / fs) continue;
+      final arah = dlt > 0 ? 1 : -1;
+      if (arahLalu != 0 && arah != arahLalu) balik++;
+      arahLalu = arah;
     }
-    energi.add(e / p.length);
-    final urut = [...p]..sort();
-    rentang.add(urut[(p.length * .98).floor()] - urut[(p.length * .02).floor()]);
-    baseline.add(urut[p.length ~/ 2]);
-  }
-  double med(List<double> v) => ([...v]..sort())[v.length ~/ 2];
-  final mE = med(energi), mR = med(rentang);
-  final kotor = List<bool>.generate(jml,
-      (k) => energi[k] > 6 * mE || rentang[k] > 3 * mR || baseline[k].abs() > 0.4);
-  // bulatkan ke blok
-  final nBlok = (x.length / fs / blok).ceil();
-  final hasil = <Segmen>[];
-  for (var b = 0; b < nBlok; b++) {
-    final a = (b * blok / 0.5).round(), z = min(jml, ((b + 1) * blok / 0.5).round());
-    var c = 0;
-    for (var k = a; k < z; k++) {
-      if (kotor[k]) c++;
-    }
-    if (c >= 1) {
-      final s = Segmen(b * blok, min((b + 1) * blok, x.length / fs));
-      if (hasil.isNotEmpty && (hasil.last.selesai - s.mulai).abs() < 1e-9) {
-        hasil[hasil.length - 1] = Segmen(hasil.last.mulai, s.selesai);
-      } else {
-        hasil.add(s);
+    final p = x.sublist(a, a + w)..sort();
+    final geser = (p[w ~/ 2] - glob).abs();
+    if (balik >= 8 || geser > 0.35) {
+      for (var i = a; i < a + w; i++) {
+        tandai[i] = true;
       }
     }
   }
-  return hasil;
+  final seg = <Segmen>[];
+  int? mulai;
+  for (var i = 0; i <= n; i++) {
+    final k = i < n && tandai[i];
+    if (k && mulai == null) mulai = i;
+    if (!k && mulai != null) {
+      seg.add(Segmen(mulai / fs, i / fs));
+      mulai = null;
+    }
+  }
+  final gabung = <Segmen>[];
+  for (final s in seg) {
+    if (gabung.isNotEmpty && s.mulai - gabung.last.selesai < 0.4) {
+      gabung[gabung.length - 1] = Segmen(gabung.last.mulai, s.selesai);
+    } else {
+      gabung.add(s);
+    }
+  }
+  final durasi = n / fs;
+  return gabung
+      .where((s) => s.selesai - s.mulai >= 0.3)
+      .map((s) => Segmen(max(0, s.mulai - 0.15), min(durasi, s.selesai + 0.15)))
+      .toList();
 }
 
 // ---------------------------------------------------------------- Pan-Tompkins
@@ -183,7 +216,8 @@ Statistik hitungStatistik(List<int> r, double fs, List<Segmen> artefak) {
 HasilAnalisis analisis(List<double> x, double fs) {
   final art = deteksiArtefak(x, fs);
   final semua = panTompkins(x, fs);
-  final r = semua.where((i) => !art.any((s) => s.memuat(i / fs))).toList();
+  // abaikan juga 0,2 s setelah artefak selesai agar lonjakan di batas tidak dihitung sebagai R
+  final r = semua.where((i) => !art.any((s) => i / fs >= s.mulai && i / fs < s.selesai + 0.2)).toList();
   return HasilAnalisis(x, fs, art, r, hitungStatistik(r, fs, art));
 }
 
