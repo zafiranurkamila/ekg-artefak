@@ -1,6 +1,7 @@
 // Logika EKG murni (tanpa Flutter): sinyal contoh, deteksi artefak,
 // Pan-Tompkins, dan statistik detak jantung yang mengabaikan bagian artefak.
 import 'dart:math';
+import 'cdae.dart';
 
 class Segmen {
   final double mulai, selesai; // detik
@@ -26,7 +27,11 @@ class HasilAnalisis {
   final List<int> puncakR; // indeks sampel, hanya di bagian bersih
   final Statistik stat;
   final List<String> jenisBeat; // 'N', 'PVC', atau 'PAC' untuk tiap puncak R
-  const HasilAnalisis(this.sinyal, this.fs, this.artefak, this.puncakR, this.stat, this.jenisBeat);
+  final List<double>? sinyalAsli; // terisi bila artefak sudah dibersihkan model
+  final Map<int, String> modelPerSegmen; // indeks segmen -> 'bw' / 'em'
+  const HasilAnalisis(this.sinyal, this.fs, this.artefak, this.puncakR, this.stat, this.jenisBeat,
+      {this.sinyalAsli, this.modelPerSegmen = const {}});
+  bool get dibersihkan => sinyalAsli != null;
   int hitung(String j) => jenisBeat.where((e) => e == j).length;
 }
 
@@ -276,4 +281,64 @@ List<double> bacaCsv(String isi) {
     if (v != null) out.add(v);
   }
   return out;
+}
+
+/// Jenis model untuk satu segmen: 'bw' (baseline wander, perubahan lambat)
+/// atau 'em' (elektroda/gerak, perubahan cepat). Model 'ma' menyusul.
+String pilihModel(List<double> x, double fs, Segmen s, Set<String> tersedia) {
+  final a = (s.mulai * fs).round(), z = min(x.length, (s.selesai * fs).round());
+  var d = 0.0;
+  for (var i = a + 1; i < z; i++) {
+    d += (x[i] - x[i - 1]).abs();
+  }
+  final rata = d / max(1, z - a - 1) * fs / 250; // setara per sampel di 250 Hz
+  final ingin = rata > 0.04 ? 'em' : 'bw';
+  if (tersedia.contains(ingin)) return ingin;
+  if (ingin == 'em' && tersedia.contains('ma')) return 'ma';
+  return tersedia.first;
+}
+
+/// Bersihkan segmen artefak dengan model CDAE, lalu analisis ulang seluruh rekaman
+/// (bagian yang sudah dibersihkan ikut dihitung).
+HasilAnalisis analisisDenganModel(List<double> x, double fs, Map<String, Cdae> model) {
+  final art = deteksiArtefak(x, fs);
+  if (art.isEmpty || model.isEmpty) return analisis(x, fs);
+  final x257 = resample(x, fs, Cdae.fs);
+  final y257 = [...x257];
+  const L = Cdae.jendela;
+  final pilihan = <int, String>{};
+  for (final (k, s) in art.indexed) {
+    final jenis = pilihModel(x, fs, s, model.keys.toSet());
+    pilihan[k] = jenis;
+    final a = (s.mulai * Cdae.fs).floor(), z = min(x257.length, (s.selesai * Cdae.fs).ceil());
+    // jendela 768 yang menutupi [a, z): satu jendela di tengah, atau beberapa bila segmen panjang
+    final mulai = <int>[];
+    if (z - a <= L - 64) {
+      mulai.add(((a + z) ~/ 2 - L ~/ 2).clamp(0, max(0, x257.length - L)));
+    } else {
+      for (var m = max(0, a - 32); ; m += L - 128) {
+        final mm = min(m, max(0, x257.length - L));
+        mulai.add(mm);
+        if (mm + L >= min(x257.length, z + 32)) break;
+      }
+    }
+    for (final m in mulai) {
+      if (m + L > x257.length) continue; // rekaman lebih pendek dari 3 detik
+      final keluar = model[jenis]!.bersihkan(x257.sublist(m, m + L));
+      // tulis hanya bagian dalam segmen, abaikan 32 sampel tepi jendela (efek padding)
+      for (var i = max(a, m + 32); i < min(z, m + L - 32); i++) {
+        y257[i] = keluar[i - m];
+      }
+    }
+  }
+  final balik = resample(y257, Cdae.fs, fs);
+  final bersih = [...x];
+  for (final s in art) {
+    for (var i = (s.mulai * fs).round(); i < min(x.length, (s.selesai * fs).round()); i++) {
+      if (i < balik.length) bersih[i] = balik[i];
+    }
+  }
+  final r = panTompkins(bersih, fs);
+  return HasilAnalisis(bersih, fs, art, r, hitungStatistik(r, fs, const []), klasifikasiBeat(bersih, fs, r),
+      sinyalAsli: x, modelPerSegmen: pilihan);
 }

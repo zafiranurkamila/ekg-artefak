@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'cdae.dart';
 import 'ekg.dart';
 
 // palet mengikuti contoh: krem, hijau zaitun, aksen oranye
@@ -35,18 +37,35 @@ class Layar extends StatefulWidget {
 
 class _LayarState extends State<Layar> {
   double _fs = 250;
+  List<double> _x = sinyalContoh();
   late HasilAnalisis _h;
   String _nama = 'Rekaman contoh';
   String _info = '20 detik · 250 Hz';
+  final Map<String, Cdae> _model = {};
+  bool _pakaiModel = false;
 
   @override
   void initState() {
     super.initState();
-    _h = analisis(sinyalContoh(), 250);
+    _h = analisis(_x, _fs);
+    _muatModel();
   }
 
+  Future<void> _muatModel() async {
+    for (final j in ['bw', 'ma', 'em']) {
+      try {
+        _model[j] = Cdae.dariBytes(await rootBundle.load('assets/model/$j.bin'));
+      } catch (_) {} // model yang belum ada dilewati
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _hitung() => _h = _pakaiModel && _model.isNotEmpty ? analisisDenganModel(_x, _fs, _model) : analisis(_x, _fs);
+
   void _contoh() => setState(() {
-        _h = analisis(sinyalContoh(), 250);
+        _x = sinyalContoh();
+        _fs = 250;
+        _hitung();
         _nama = 'Rekaman contoh';
         _info = '20 detik · 250 Hz';
       });
@@ -63,7 +82,8 @@ class _LayarState extends State<Layar> {
       if (x.length < fs * 2) throw 'data terlalu pendek';
       setState(() {
         _fs = fs;
-        _h = analisis(x, fs);
+        _x = x;
+        _hitung();
         _nama = f.name;
         _info = '${(x.length / fs).toStringAsFixed(1)} detik · ${fs.round()} Hz';
       });
@@ -169,6 +189,30 @@ class _LayarState extends State<Layar> {
         ]),
       ),
       const SizedBox(height: 18),
+      Container(
+        padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+        decoration: kartu(),
+        child: Row(children: [
+          const Icon(Icons.auto_fix_high_rounded, color: zaitun),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('Bersihkan artefak (model CDAE)', style: TextStyle(fontWeight: FontWeight.w600, color: tinta)),
+              Text(_model.isEmpty ? 'Memuat model...' : 'Model: ${_model.keys.join(', ').toUpperCase()} · dari Zaskia',
+                  style: const TextStyle(color: redup, fontSize: 12)),
+            ]),
+          ),
+          Switch(
+            value: _pakaiModel,
+            activeTrackColor: zaitun,
+            onChanged: _model.isEmpty ? null : (v) => setState(() {
+              _pakaiModel = v;
+              _hitung();
+            }),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 18),
       _judul('Sinyal EKG', TextButton(onPressed: _contoh, child: const Text('Pakai contoh', style: TextStyle(color: oranye)))),
       Container(
         padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
@@ -252,7 +296,11 @@ class _LayarState extends State<Layar> {
                 Text('${a.mulai.toStringAsFixed(2)} s  –  ${a.selesai.toStringAsFixed(2)} s',
                     style: const TextStyle(fontWeight: FontWeight.w700, color: tinta)),
                 const SizedBox(height: 2),
-                const Text('Tidak masuk perhitungan HR', style: TextStyle(color: redup, fontSize: 12.5)),
+                Text(
+                    _h.dibersihkan
+                        ? 'Dibersihkan model ${(_h.modelPerSegmen[i] ?? '').toUpperCase()}, ikut dihitung'
+                        : 'Tidak masuk perhitungan HR',
+                    style: const TextStyle(color: redup, fontSize: 12.5)),
               ]),
             ),
             Container(
@@ -366,25 +414,54 @@ class Grafik extends CustomPainter {
       }
     }
 
-    // sinyal EKG, garis hitam tipis
-    final p = Path();
-    final perPx = h.sinyal.length / w;
-    for (var k = 0; k < w; k++) {
-      final a = (k * perPx).floor(), z = ((k + 1) * perPx).ceil().clamp(a + 1, h.sinyal.length);
-      var mn = h.sinyal[a], mx = h.sinyal[a];
-      for (var i = a; i < z; i++) {
-        if (h.sinyal[i] < mn) mn = h.sinyal[i];
-        if (h.sinyal[i] > mx) mx = h.sinyal[i];
+    // sinyal EKG, garis hitam tipis. Bila sudah dibersihkan model: sinyal asli abu,
+    // hasil model hijau tua di area artefak.
+    Path jalur(List<double> sig) {
+      final p = Path();
+      final perPx = sig.length / w;
+      for (var k = 0; k < w; k++) {
+        final a = (k * perPx).floor(), z = ((k + 1) * perPx).ceil().clamp(a + 1, sig.length);
+        var mn = sig[a], mx = sig[a];
+        for (var i = a; i < z; i++) {
+          if (sig[i] < mn) mn = sig[i];
+          if (sig[i] > mx) mx = sig[i];
+        }
+        final x = kiri + k.toDouble();
+        if (k == 0) p.moveTo(x, py(mx));
+        p.lineTo(x, py(mx));
+        p.lineTo(x, py(mn));
       }
-      final x = kiri + k.toDouble();
-      if (k == 0) p.moveTo(x, py(mx));
-      p.lineTo(x, py(mx));
-      p.lineTo(x, py(mn));
+      return p;
     }
-    c.drawPath(p, Paint()
+
+    final gaya = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8
-      ..color = Colors.black);
+      ..strokeWidth = 0.8;
+    if (h.dibersihkan) {
+      c.drawPath(jalur(h.sinyalAsli!), gaya..color = const Color(0x55000000));
+      c.save();
+      final luar = Path()..addRect(Rect.fromLTWH(kiri, atas, w, ht));
+      for (final s in h.artefak) {
+        luar.addRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht));
+      }
+      luar.fillType = PathFillType.evenOdd;
+      c.clipPath(luar);
+      c.drawPath(jalur(h.sinyal), gaya..color = Colors.black);
+      c.restore();
+      c.save();
+      final dalam = Path();
+      for (final s in h.artefak) {
+        dalam.addRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht));
+      }
+      c.clipPath(dalam);
+      c.drawPath(jalur(h.sinyal), Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.3
+        ..color = const Color(0xFF1E6B45));
+      c.restore();
+    } else {
+      c.drawPath(jalur(h.sinyal), gaya..color = Colors.black);
+    }
 
     // puncak R: segitiga biru; PVC/PAC diberi label
     final ukuran = kecil ? 3.5 : 5.0;
