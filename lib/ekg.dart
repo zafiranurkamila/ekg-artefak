@@ -31,42 +31,38 @@ class HasilAnalisis {
 }
 
 /// Klasifikasi beat berbasis aturan (sementara, sebelum model AI dipasang):
-/// - PVC: QRS lebar (>= 100 ms), biasanya datang lebih awal.
-/// - PAC: datang lebih awal (R-R < 80% median) dengan QRS normal.
+/// - PVC: QRS lebar (>= 100 ms).
+/// - PAC: QRS normal, datang lebih awal (R-R < 80% R-R sebelumnya)
+///   lalu diikuti jeda lebih panjang. R-R > 2 s dianggap terputus artefak.
 List<String> klasifikasiBeat(List<double> x, double fs, List<int> r) {
-  final rr = <double>[for (var i = 1; i < r.length; i++) (r[i] - r[i - 1]) / fs];
-  final urut = [...rr]..sort();
-  final median = urut.isEmpty ? 1.0 : urut[urut.length ~/ 2];
-  final w = (0.12 * fs).round();
+  final n = x.length;
+  double lebarQrs(int i) {
+    final jendela = x.sublist(max(0, i - (0.5 * fs).round()), min(n, i + (0.5 * fs).round()))..sort();
+    final dasar = jendela[jendela.length ~/ 2];
+    var amp = 0.0;
+    for (var j = max(0, i - (0.05 * fs).round()); j < min(n, i + (0.05 * fs).round()); j++) {
+      amp = max(amp, (x[j] - dasar).abs());
+    }
+    int? awal, akhir;
+    for (var j = max(0, i - (0.12 * fs).round()); j < min(n, i + (0.12 * fs).round()); j++) {
+      if ((x[j] - dasar).abs() > 0.3 * amp) {
+        awal ??= j;
+        akhir = j;
+      }
+    }
+    return awal == null ? 0 : (akhir! - awal) / fs * 1000;
+  }
+
+  double? rr(int k) => k <= 0 || k >= r.length || (r[k] - r[k - 1]) / fs > 2 ? null : (r[k] - r[k - 1]) / fs;
   return [
     for (var k = 0; k < r.length; k++)
-      () {
-        final i = r[k];
-        final a = max(0, i - w), z = min(x.length, i + w);
-        // garis dasar lokal: median 0,3 s sebelum QRS
-        final pra = x.sublist(max(0, i - (0.3 * fs).round()), max(1, i - (0.1 * fs).round()))..sort();
-        final dasar = pra.isEmpty ? 0.0 : pra[pra.length ~/ 2];
-        final ambang = 0.25 * (x[i] - dasar).abs();
-        int? awal, akhir;
-        for (var j = a; j < z; j++) {
-          if ((x[j] - dasar).abs() > ambang) {
-            awal ??= j;
-            akhir = j;
-          }
-        }
-        final lebarMs = awal == null ? 0 : (akhir! - awal) / fs * 1000;
-        final awalBeat = k > 0 && rr[k - 1] < 0.8 * median;
-        if (lebarMs >= 100) return 'PVC';
-        if (awalBeat) return 'PAC';
-        return 'N';
-      }()
+      if (lebarQrs(r[k]) >= 100)
+        'PVC'
+      else if (rr(k) != null && rr(k - 1) != null && rr(k)! < 0.8 * rr(k - 1)! && (rr(k + 1) ?? 0) > 1.15 * rr(k)!)
+        'PAC'
+      else
+        'N'
   ];
-}
-
-/// Titik sambung untuk model aritmia (mis. model Zaskia).
-/// Implementasi nanti bisa memanggil TFLite/ONNX atau server Python.
-abstract class ModelAritmia {
-  Future<String> klasifikasi(List<double> potonganBeat, double fs);
 }
 
 // ---------------------------------------------------------------- sinyal contoh
