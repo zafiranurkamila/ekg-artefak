@@ -26,8 +26,15 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          flutter build web --release --base-href /${{ github.event.repository.name }}/ 2>&1 | tee build.log || {
+          flutter build web --release --pwa-strategy=none --base-href /${{ github.event.repository.name }}/ 2>&1 | tee build.log || {
             grep -E "rror|\.dart:[0-9]+" build.log | head -25 | while read -r l; do echo "::error::$l"; done; exit 1; }
+      - name: Beri nomor versi pada file JS agar browser tidak memakai cache lama
+        shell: bash
+        run: |
+          V=${GITHUB_SHA::7}
+          sed -i "s#main.dart.js#main.dart.js?v=$V#g" build/web/flutter_bootstrap.js
+          sed -i "s#flutter_bootstrap.js#flutter_bootstrap.js?v=$V#g" build/web/index.html
+          grep -c "v=$V" build/web/flutter_bootstrap.js build/web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
