@@ -237,8 +237,13 @@ class _LayarState extends State<Layar> {
       const SizedBox(height: 14),
       Row(children: [
         Expanded(
-          child: Text('$_nama, $_info', style: const TextStyle(color: redup, fontSize: 13), overflow: TextOverflow.ellipsis),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(_nama, style: const TextStyle(color: hijauGelap, fontSize: 13.5, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 2),
+            Text(_info, style: const TextStyle(color: redup, fontSize: 12.5)),
+          ]),
         ),
+        const SizedBox(width: 12),
         _Pil(teks: 'Pilih contoh', onTap: _contoh),
       ]),
       const SizedBox(height: 26),
