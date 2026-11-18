@@ -22,7 +22,12 @@ jobs:
       - name: Lengkapi folder web
         run: flutter create --platforms=web --project-name ekg_artefak .
       - run: flutter pub get
-      - run: flutter build web --release --base-href /${{ github.event.repository.name }}/
+      - name: Build web
+        shell: bash
+        run: |
+          set -o pipefail
+          flutter build web --release --base-href /${{ github.event.repository.name }}/ 2>&1 | tee build.log || {
+            grep -E "rror|\.dart:[0-9]+" build.log | head -25 | while read -r l; do echo "::error::$l"; done; exit 1; }
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web
