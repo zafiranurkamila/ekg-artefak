@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'ekg.dart';
 
 // palet mengikuti contoh: krem, hijau zaitun, aksen oranye
-const krem = Color(0xFFF7F3EA);
+const krem = Color(0xFFFFFFFF); // latar putih
 const zaitun = Color(0xFF5B7B3A);
 const zaitunTua = Color(0xFF3E5A26);
 const zaitunMuda = Color(0xFFE8EED9);
