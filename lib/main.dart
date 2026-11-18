@@ -84,20 +84,13 @@ class _LayarState extends State<Layar> {
                       border: Border.all(color: Colors.red.shade300),
                       borderRadius: BorderRadius.circular(8)),
                   child: Text(
-                    '=== DASBOR HEART RATE ===
-'
-                    'Total Beat          : ${s.totalBeat}
-'
-                    'HR Max/Min          : ${s.hrMax.round()}/${s.hrMin.round()} bpm
-'
-                    'Rata-rata HR        : ${s.hrRata.round()} bpm
-'
-                    'Kejadian Tachycardia: ${s.tachy} interval
-'
-                    'Kejadian Bradycardia: ${s.brady} interval
-'
-                    'Takikardia/Bradikardia: ${s.persenTachy.toStringAsFixed(1)}% / ${s.persenBrady.toStringAsFixed(1)}%
-'
+                    '=== DASBOR HEART RATE ===\n'
+                    'Total Beat          : ${s.totalBeat}\n'
+                    'HR Max/Min          : ${s.hrMax.round()}/${s.hrMin.round()} bpm\n'
+                    'Rata-rata HR        : ${s.hrRata.round()} bpm\n'
+                    'Kejadian Tachycardia: ${s.tachy} interval\n'
+                    'Kejadian Bradycardia: ${s.brady} interval\n'
+                    'Takikardia/Bradikardia: ${s.persenTachy.toStringAsFixed(1)}% / ${s.persenBrady.toStringAsFixed(1)}%\n'
                     'Interval dipakai    : ${s.jumlahInterval} (artefak dibuang)',
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, fontWeight: FontWeight.w600),
                   ),
@@ -119,20 +112,13 @@ class _LayarState extends State<Layar> {
                       border: Border.all(color: Colors.red.shade300),
                       borderRadius: BorderRadius.circular(8)),
                   child: Text(
-                    '=== DASBOR HEART RATE ===
-'
-                    'Total Beat          : ${s.totalBeat}
-'
-                    'HR Max/Min          : ${s.hrMax.round()}/${s.hrMin.round()} bpm
-'
-                    'Rata-rata HR        : ${s.hrRata.round()} bpm
-'
-                    'Kejadian Tachycardia: ${s.tachy} interval
-'
-                    'Kejadian Bradycardia: ${s.brady} interval
-'
-                    'Takikardia/Bradikardia: ${s.persenTachy.toStringAsFixed(1)}% / ${s.persenBrady.toStringAsFixed(1)}%
-'
+                    '=== DASBOR HEART RATE ===\n'
+                    'Total Beat          : ${s.totalBeat}\n'
+                    'HR Max/Min          : ${s.hrMax.round()}/${s.hrMin.round()} bpm\n'
+                    'Rata-rata HR        : ${s.hrRata.round()} bpm\n'
+                    'Kejadian Tachycardia: ${s.tachy} interval\n'
+                    'Kejadian Bradycardia: ${s.brady} interval\n'
+                    'Takikardia/Bradikardia: ${s.persenTachy.toStringAsFixed(1)}% / ${s.persenBrady.toStringAsFixed(1)}%\n'
                     'Interval dipakai    : ${s.jumlahInterval} (artefak dibuang)',
                     style: const TextStyle(fontFamily: 'monospace', fontSize: 12.5, fontWeight: FontWeight.w600),
                   ),
