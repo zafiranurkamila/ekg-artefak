@@ -366,7 +366,9 @@ class _NavBawah extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Row(children: [
+        child: SizedBox(
+          height: 66,
+          child: Row(children: [
           item(0, Icons.home_rounded, 'Beranda'),
           Expanded(
             child: Center(
@@ -384,7 +386,8 @@ class _NavBawah extends StatelessWidget {
             ),
           ),
           item(1, Icons.info_outline_rounded, 'Cara kerja'),
-        ]),
+          ]),
+        ),
       ),
     );
   }
