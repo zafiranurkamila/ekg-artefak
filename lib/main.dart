@@ -25,8 +25,8 @@ void main() => runApp(MaterialApp(
 
 BoxDecoration kartu([Color warna = Colors.white]) => BoxDecoration(
       color: warna,
-      borderRadius: BorderRadius.circular(22),
-      boxShadow: const [BoxShadow(color: Color(0x0F000000), blurRadius: 14, offset: Offset(0, 4))],
+      borderRadius: BorderRadius.circular(14),
+      boxShadow: const [BoxShadow(color: Color(0x0D000000), blurRadius: 10, offset: Offset(0, 2))],
     );
 
 class Layar extends StatefulWidget {
@@ -131,7 +131,18 @@ class _LayarState extends State<Layar> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        body: SafeArea(child: _beranda()),
+        backgroundColor: const Color(0xFFF7F8F7),
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
+          elevation: 0,
+          titleSpacing: 16,
+          title: const Text('Deteksi Artefak EKG',
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: tinta)),
+          bottom: const PreferredSize(
+              preferredSize: Size.fromHeight(1), child: Divider(height: 1, color: Color(0xFFEDEFEE))),
+        ),
+        body: _beranda(),
       );
 
   Widget _judul(String t, [Widget? ekor]) => Padding(
@@ -146,144 +157,183 @@ class _LayarState extends State<Layar> {
     final s = _h.stat;
     final durasi = _h.sinyal.length / _h.fs;
     final durArt = _h.artefak.fold(0.0, (a, g) => a + g.selesai - g.mulai);
-    return ListView(padding: const EdgeInsets.fromLTRB(18, 14, 18, 24), children: [
-      const Text('Deteksi Artefak EKG', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: tinta)),
-      const SizedBox(height: 18),
+    final persenBersih = durasi == 0 ? 0.0 : (1 - durArt / durasi).clamp(0.0, 1.0);
+    String statusHr(double v) => v == 0 ? '-' : (v < 60 ? 'Rendah' : (v > 100 ? 'Tinggi' : 'Normal'));
+    String ada(int n) => n == 0 ? 'Normal' : 'Perlu perhatian';
+    return ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 28), children: [
+      // rekaman
       Container(
         padding: const EdgeInsets.all(16),
-        decoration: kartu(zaitunMuda),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(_nama, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: zaitunTua)),
-              const SizedBox(height: 2),
-              Text(_info, style: const TextStyle(color: zaitunTua, fontSize: 13)),
-              const SizedBox(height: 12),
-              _TombolPil(teks: 'Ganti rekaman', ikon: Icons.swap_horiz_rounded, kecil: true, onTap: _muat),
-            ]),
-          ),
-          const SizedBox(width: 10),
-          Container(
-            width: 74,
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
-            child: Column(children: [
-              Text('${_h.artefak.length}', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: oranye)),
-              const Text('artefak', style: TextStyle(fontSize: 11, color: redup)),
-            ]),
-          ),
+        decoration: kartu(),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Rekaman', style: TextStyle(color: redup, fontSize: 12.5)),
+          const SizedBox(height: 2),
+          Text(_nama, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: tinta)),
+          Text(_info, style: const TextStyle(color: redup, fontSize: 13)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: FilledButton(
+                style: FilledButton.styleFrom(
+                    backgroundColor: zaitun, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                onPressed: _muat,
+                child: const Text('Muat rekaman'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                    foregroundColor: zaitun,
+                    side: const BorderSide(color: zaitun),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                onPressed: _contoh,
+                child: const Text('Pakai contoh'),
+              ),
+            ),
+          ]),
         ]),
       ),
-      const SizedBox(height: 18),
+      const SizedBox(height: 12),
+
+      // kualitas sinyal + saklar model
       Container(
-        padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+        padding: const EdgeInsets.all(16),
         decoration: kartu(),
-        child: Row(children: [
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Bersihkan artefak dengan model CDAE', style: TextStyle(fontWeight: FontWeight.w600, color: tinta)),
-              Text(_model.isEmpty ? 'Memuat model...' : 'Denoising untuk noise ${_model.keys.join(', ').toUpperCase()}',
-                  style: const TextStyle(color: redup, fontSize: 12)),
-            ]),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            const Expanded(child: Text('Kualitas sinyal', style: TextStyle(fontWeight: FontWeight.w700, color: tinta))),
+            Text('${(persenBersih * 100).round()}% bersih', style: const TextStyle(fontWeight: FontWeight.w700, color: zaitun)),
+          ]),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+                value: persenBersih, minHeight: 8, color: zaitun, backgroundColor: const Color(0xFFF2BDBD)),
           ),
-          Switch(
-            value: _pakaiModel,
-            activeTrackColor: zaitun,
-            onChanged: _model.isEmpty ? null : (v) => setState(() {
-              _pakaiModel = v;
-              _hitung();
-            }),
-          ),
+          const SizedBox(height: 8),
+          Text('${_h.artefak.length} segmen artefak, ${durArt.toStringAsFixed(1)} dari ${durasi.toStringAsFixed(0)} detik',
+              style: const TextStyle(color: redup, fontSize: 12.5)),
+          const Divider(height: 24, color: Color(0xFFEDEFEE)),
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Bersihkan dengan model CDAE', style: TextStyle(fontWeight: FontWeight.w600, color: tinta)),
+                Text(
+                    _model.isEmpty
+                        ? 'Memuat model...'
+                        : (_pakaiModel ? 'Artefak dibersihkan lalu ikut dihitung' : 'Artefak dibuang dari perhitungan'),
+                    style: const TextStyle(color: redup, fontSize: 12)),
+              ]),
+            ),
+            Switch(
+              value: _pakaiModel,
+              activeTrackColor: zaitun,
+              onChanged: _model.isEmpty
+                  ? null
+                  : (v) => setState(() {
+                        _pakaiModel = v;
+                        _hitung();
+                      }),
+            ),
+          ]),
         ]),
       ),
-      const SizedBox(height: 18),
-      _judul('Sinyal EKG', TextButton(onPressed: _contoh, child: const Text('Pakai contoh', style: TextStyle(color: oranye)))),
+      const SizedBox(height: 12),
+
+      // grafik
       Container(
-        padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+        padding: const EdgeInsets.fromLTRB(8, 14, 8, 8),
         decoration: kartu(),
-        child: Column(children: [
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Padding(
+            padding: EdgeInsets.only(left: 8, bottom: 8),
+            child: Text('Sinyal EKG', style: TextStyle(fontWeight: FontWeight.w700, color: tinta)),
+          ),
           AspectRatio(aspectRatio: 1.45, child: CustomPaint(painter: Grafik(_h))),
         ]),
       ),
-      const SizedBox(height: 18),
-      _judul('Detak Jantung'),
+      const SizedBox(height: 20),
+
+      // hasil pemeriksaan
+      const Padding(
+        padding: EdgeInsets.only(left: 4, bottom: 8),
+        child: Text('Hasil Pemeriksaan', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: tinta)),
+      ),
       Container(
-        padding: const EdgeInsets.all(16),
         decoration: kartu(),
         child: Column(children: [
-          Row(children: [
-            Expanded(child: _Detail(ikon: Icons.favorite_rounded, label: 'Rata-rata', nilai: '${s.hrRata.round()} bpm')),
-            Expanded(child: _Detail(ikon: Icons.swap_vert_rounded, label: 'Max / Min', nilai: '${s.hrMax.round()} / ${s.hrMin.round()}')),
-          ]),
-          const SizedBox(height: 14),
-          Row(children: [
-            Expanded(child: _Detail(ikon: Icons.speed_rounded, label: 'Takikardia', nilai: '${s.tachy} interval')),
-            Expanded(child: _Detail(ikon: Icons.hourglass_bottom_rounded, label: 'Bradikardia', nilai: '${s.brady} interval')),
-          ]),
-          const SizedBox(height: 14),
-          Row(children: [
-            Expanded(child: _Detail(ikon: Icons.graphic_eq_rounded, label: 'Total beat', nilai: '${s.totalBeat} beat')),
-            Expanded(
-                child: _Detail(
-                    ikon: Icons.pie_chart_rounded,
-                    label: 'Taki / Bradi',
-                    nilai: '${s.persenTachy.toStringAsFixed(0)}% / ${s.persenBrady.toStringAsFixed(0)}%')),
-          ]),
+          _Hasil('Rata-rata detak jantung', '${s.hrRata.round()} bpm', statusHr(s.hrRata)),
+          _Hasil('Detak tertinggi', '${s.hrMax.round()} bpm', statusHr(s.hrMax)),
+          _Hasil('Detak terendah', '${s.hrMin.round()} bpm', statusHr(s.hrMin)),
+          _Hasil('Takikardia (> 100 bpm)', '${s.tachy} interval · ${s.persenTachy.toStringAsFixed(0)}%', ada(s.tachy)),
+          _Hasil('Bradikardia (< 60 bpm)', '${s.brady} interval · ${s.persenBrady.toStringAsFixed(0)}%', ada(s.brady)),
+          _Hasil('PVC', '${_h.hitung('PVC')} beat', ada(_h.hitung('PVC'))),
+          _Hasil('PAC', '${_h.hitung('PAC')} beat', ada(_h.hitung('PAC')), terakhir: true),
         ]),
       ),
-      const SizedBox(height: 18),
-      _judul('Aritmia', const Text('aturan klinis · model AI menyusul', style: TextStyle(color: redup, fontSize: 12))),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+        child: Text('Dihitung dari ${s.totalBeat} detak dan ${s.jumlahInterval} interval R-R. Hasil ini bukan diagnosis.',
+            style: const TextStyle(color: redup, fontSize: 11.5)),
+      ),
+      const SizedBox(height: 20),
+
+      // segmen artefak
+      const Padding(
+        padding: EdgeInsets.only(left: 4, bottom: 8),
+        child: Text('Segmen Artefak', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: tinta)),
+      ),
       Container(
-        padding: const EdgeInsets.all(16),
         decoration: kartu(),
-        child: Row(children: [
-          Expanded(child: _Detail(ikon: Icons.bolt_rounded, label: 'PVC', nilai: '${_h.hitung('PVC')} beat')),
-          Expanded(child: _Detail(ikon: Icons.timelapse_rounded, label: 'PAC', nilai: '${_h.hitung('PAC')} beat')),
+        child: Column(children: [
+          if (_h.artefak.isEmpty)
+            const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text('Tidak ada artefak. Seluruh rekaman dihitung.', style: TextStyle(color: tinta))),
+          for (final (i, a) in _h.artefak.indexed)
+            _Hasil(
+              'Segmen ${i + 1}',
+              '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik',
+              _h.dibersihkan ? 'Dibersihkan ${(_h.modelPerSegmen[i] ?? '').toUpperCase()}' : 'Dibuang',
+              netral: true,
+              terakhir: i == _h.artefak.length - 1,
+            ),
         ]),
       ),
-      const SizedBox(height: 18),
-      _judul('Segmen Artefak',
-          Text('${durArt.toStringAsFixed(1)} dari ${durasi.toStringAsFixed(0)} detik', style: const TextStyle(color: redup, fontSize: 12.5))),
-      if (_h.artefak.isEmpty)
-        Container(
-            padding: const EdgeInsets.all(16),
-            decoration: kartu(),
-            child: const Text('Tidak ada artefak. Semua sinyal dihitung.', style: TextStyle(color: zaitunTua))),
-      for (final (i, a) in _h.artefak.indexed)
-        Container(
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.all(14),
-          decoration: kartu(),
-          child: Row(children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(color: merahLembut, borderRadius: BorderRadius.circular(14)),
-              alignment: Alignment.center,
-              child: Text('${i + 1}', style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF14532F), fontSize: 16)),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('${a.mulai.toStringAsFixed(2)} s  –  ${a.selesai.toStringAsFixed(2)} s',
-                    style: const TextStyle(fontWeight: FontWeight.w700, color: tinta)),
-                const SizedBox(height: 2),
-                Text(
-                    _h.dibersihkan
-                        ? 'Dibersihkan model ${(_h.modelPerSegmen[i] ?? '').toUpperCase()}, ikut dihitung'
-                        : 'Tidak masuk perhitungan HR',
-                    style: const TextStyle(color: redup, fontSize: 12.5)),
-              ]),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: zaitunMuda, borderRadius: BorderRadius.circular(20)),
-              child: Text('${(a.selesai - a.mulai).toStringAsFixed(1)} s',
-                  style: const TextStyle(color: zaitunTua, fontWeight: FontWeight.w600, fontSize: 12.5)),
-            ),
+    ]);
+  }
+}
+
+class _Hasil extends StatelessWidget {
+  final String label, nilai, status;
+  final bool terakhir, netral;
+  const _Hasil(this.label, this.nilai, this.status, {this.terakhir = false, this.netral = false});
+  @override
+  Widget build(BuildContext context) {
+    final baik = status == 'Normal';
+    final bg = netral ? const Color(0xFFF1F3F2) : (baik ? zaitunMuda : const Color(0xFFFDECEA));
+    final fg = netral ? redup : (baik ? zaitun : const Color(0xFFB3261E));
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      decoration:
+          BoxDecoration(border: terakhir ? null : const Border(bottom: BorderSide(color: Color(0xFFEDEFEE)))),
+      child: Row(children: [
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(color: redup, fontSize: 12.5)),
+            const SizedBox(height: 2),
+            Text(nilai, style: const TextStyle(fontWeight: FontWeight.w700, color: tinta, fontSize: 15)),
           ]),
         ),
-    ]);
+        if (status != '-')
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+            child: Text(status, style: TextStyle(color: fg, fontWeight: FontWeight.w600, fontSize: 12)),
+          ),
+      ]),
+    );
   }
 }
 
