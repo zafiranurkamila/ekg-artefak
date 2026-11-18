@@ -174,14 +174,14 @@ class _LayarState extends State<Layar> {
         padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
         decoration: kartu(),
         child: Column(children: [
-          AspectRatio(aspectRatio: 1.75, child: CustomPaint(painter: Grafik(_h))),
+          AspectRatio(aspectRatio: 1.45, child: CustomPaint(painter: Grafik(_h))),
           const SizedBox(height: 8),
           const Wrap(alignment: WrapAlignment.center, runSpacing: 4, children: [
-            _Titik(warna: Color(0xFFD5DAD7), teks: 'Artefak'),
+            _Titik(warna: Color(0xFFF2BDBD), teks: 'Artefak'),
             SizedBox(width: 14),
-            _Titik(warna: Color(0xFFD6EADD), teks: 'Bersih'),
+            _Titik(warna: Color(0xFFCFE6CF), teks: 'Bersih'),
             SizedBox(width: 14),
-            _Titik(warna: Color(0xFF1E6B45), teks: 'Normal'),
+            _Titik(warna: Color(0xFF1F77B4), teks: 'Puncak R'),
             SizedBox(width: 14),
             _Titik(warna: Color(0xFF1C211E), teks: 'PVC'),
             SizedBox(width: 14),
@@ -330,35 +330,43 @@ class Grafik extends CustomPainter {
   final HasilAnalisis h;
   Grafik(this.h);
 
+  // warna mengikuti grafik referensi dari Bapak
+  static const merahArea = Color(0xFFF2BDBD), hijauArea = Color(0xFFE8F4E8);
+  static const merahTeks = Color(0xFFC62828), biruR = Color(0xFF1F77B4);
+
   @override
   void paint(Canvas c, Size size) {
-    const kiri = 22.0, bawah = 18.0, atas = 4.0, kanan = 4.0;
+    const kiri = 34.0, bawah = 30.0, atas = 4.0, kanan = 4.0;
     final w = size.width - kiri - kanan, ht = size.height - atas - bawah;
     final durasi = h.sinyal.length / h.fs;
-    const lo = -4.0, hi = 4.0;
+    const lo = -5.0, hi = 5.0;
     double px(double t) => kiri + t / durasi * w;
     double py(double v) => atas + (hi - v.clamp(lo, hi)) / (hi - lo) * ht;
-    final area = RRect.fromRectAndRadius(Rect.fromLTWH(kiri, atas, w, ht), const Radius.circular(12));
+    final kecil = w < 500;
 
-    c.save();
-    c.clipRRect(area);
-    c.drawRect(area.outerRect, Paint()..color = const Color(0xFFF5F9F6));
+    // latar: bersih hijau, artefak merah
+    c.drawRect(Rect.fromLTWH(kiri, atas, w, ht), Paint()..color = hijauArea);
     for (final s in h.artefak) {
-      c.drawRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht), Paint()..color = const Color(0xFFE6E9E7));
-      if (px(s.selesai) - px(s.mulai) > 40) {
-        _teks(c, 'ARTEFAK', Offset((px(s.mulai) + px(s.selesai)) / 2, atas + 5), 8.5, const Color(0xFF14532F),
-            bold: true, tengah: true);
-      }
+      c.drawRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht), Paint()..color = merahArea);
     }
-    final garis = Paint()
-      ..color = const Color(0x22000000)
+    // garis putus-putus tiap 2 detik (seperti referensi)
+    final putus = Paint()
+      ..color = const Color(0x55000000)
       ..strokeWidth = 0.8;
-    final langkahGrid = durasi > 40 ? 10.0 : (durasi > 12 ? 2.0 : 1.0);
-    for (var t = langkahGrid; t < durasi; t += langkahGrid) {
-      for (var y = atas; y < atas + ht; y += 6) {
-        c.drawLine(Offset(px(t), y), Offset(px(t), y + 3), garis);
+    final blok = durasi > 40 ? 10.0 : 2.0;
+    for (var t = blok; t < durasi; t += blok) {
+      for (var y = atas; y < atas + ht; y += 7) {
+        c.drawLine(Offset(px(t), y), Offset(px(t), y + 4), putus);
       }
     }
+    // label ARTEFAK di kotak putih
+    for (final s in h.artefak) {
+      if (px(s.selesai) - px(s.mulai) > 34) {
+        _label(c, 'ARTEFAK', Offset((px(s.mulai) + px(s.selesai)) / 2, atas + ht * 0.1), kecil ? 6.5 : 9);
+      }
+    }
+
+    // sinyal EKG, garis hitam tipis
     final p = Path();
     final perPx = h.sinyal.length / w;
     for (var k = 0; k < w; k++) {
@@ -375,24 +383,76 @@ class Grafik extends CustomPainter {
     }
     c.drawPath(p, Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.9
-      ..color = tinta);
+      ..strokeWidth = 0.8
+      ..color = Colors.black);
+
+    // puncak R: segitiga biru; PVC/PAC diberi label
+    final ukuran = kecil ? 3.5 : 5.0;
     for (final (k, i) in h.puncakR.indexed) {
       final j = h.jenisBeat[k];
-      final x = px(i / h.fs), y = py(h.sinyal[i]) - 3;
-      c.drawPath(Path()..moveTo(x - 4, y - 7)..lineTo(x + 4, y - 7)..lineTo(x, y)..close(),
-          Paint()..color = warnaBeat[j]!);
-      if (j != 'N') _teks(c, j, Offset(x, y - 19), 8, warnaBeat[j]!, bold: true, tengah: true);
+      final x = px(i / h.fs), y = py(h.sinyal[i]) - 2;
+      c.drawPath(
+          Path()
+            ..moveTo(x - ukuran, y - ukuran * 1.8)
+            ..lineTo(x + ukuran, y - ukuran * 1.8)
+            ..lineTo(x, y)
+            ..close(),
+          Paint()..color = biruR);
+      if (j != 'N') _teks(c, j, Offset(x, y - ukuran * 1.8 - 11), kecil ? 7 : 9, Colors.black, bold: true, tengah: true);
     }
-    c.restore();
-    for (var t = 0.0; t <= durasi + 1e-9; t += langkahGrid) {
-      if ((t / langkahGrid) % (w < 500 ? 2 : 1) == 0) {
-        _teks(c, t.toStringAsFixed(0), Offset(px(t), atas + ht + 4), 9, redup, tengah: true);
+
+    // bingkai dan sumbu
+    c.drawRect(Rect.fromLTWH(kiri, atas, w, ht), Paint()
+      ..style = PaintingStyle.stroke
+      ..color = Colors.black
+      ..strokeWidth = 0.8);
+    final fs = kecil ? 7.5 : 10.0;
+    final langkahX = durasi > 40 ? 10.0 : (durasi > 12 ? 2.5 : 1.0);
+    for (var t = 0.0; t <= durasi + 1e-9; t += langkahX) {
+      c.drawLine(Offset(px(t), atas + ht), Offset(px(t), atas + ht + 3), Paint()..color = Colors.black);
+      if (!kecil || (t / langkahX) % 2 == 0) {
+        _teks(c, t.toStringAsFixed(1), Offset(px(t), atas + ht + 4), fs, Colors.black, tengah: true);
       }
     }
-    for (final v in [-2.0, 0.0, 2.0]) {
-      _teks(c, v.toStringAsFixed(0), Offset(kiri - 13, py(v) - 6), 9, redup);
+    for (final v in [-4.0, -2.0, 0.0, 2.0, 4.0]) {
+      c.drawLine(Offset(kiri - 3, py(v)), Offset(kiri, py(v)), Paint()..color = Colors.black);
+      _teks(c, v.toStringAsFixed(0), Offset(kiri - 13, py(v) - fs * 0.65), fs, Colors.black);
     }
+    _teks(c, 'Waktu (Detik)', Offset(kiri + w / 2, atas + ht + 4 + fs + 3), fs, Colors.black, tengah: true);
+    c.save();
+    c.translate(2, atas + ht / 2);
+    c.rotate(-1.5708);
+    _teks(c, 'Amplitudo (mV)', Offset(0, -1), fs, Colors.black, tengah: true);
+    c.restore();
+
+    // legenda kanan atas
+    final lg = TextStyle(fontSize: kecil ? 7 : 10, color: Colors.black);
+    final t1 = TextPainter(text: TextSpan(text: 'Sinyal Dinamis EKG (+ PVC/PAC)', style: lg), textDirection: TextDirection.ltr)..layout();
+    final t2 = TextPainter(text: TextSpan(text: 'Puncak R (Pan-Tompkins)', style: lg), textDirection: TextDirection.ltr)..layout();
+    final simbol = kecil ? 16.0 : 24.0;
+    final lebar = simbol + 6 + (t1.width > t2.width ? t1.width : t2.width) + 10;
+    final tinggi = t1.height + t2.height + 10;
+    final kotak = Rect.fromLTWH(kiri + w - lebar - 4, atas + 4, lebar, tinggi);
+    c.drawRRect(RRect.fromRectAndRadius(kotak, const Radius.circular(3)), Paint()..color = const Color(0xEEFFFFFF));
+    c.drawRRect(RRect.fromRectAndRadius(kotak, const Radius.circular(3)), Paint()
+      ..style = PaintingStyle.stroke
+      ..color = const Color(0x33000000));
+    final y1 = kotak.top + 5 + t1.height / 2, y2 = kotak.top + 5 + t1.height + t2.height / 2;
+    c.drawLine(Offset(kotak.left + 5, y1), Offset(kotak.left + 5 + simbol, y1), Paint()..color = Colors.black);
+    final cx = kotak.left + 5 + simbol / 2, u = kecil ? 3.0 : 4.5;
+    c.drawPath(Path()..moveTo(cx - u, y2 - u)..lineTo(cx + u, y2 - u)..lineTo(cx, y2 + u)..close(), Paint()..color = biruR);
+    t1.paint(c, Offset(kotak.left + 11 + simbol, kotak.top + 5));
+    t2.paint(c, Offset(kotak.left + 11 + simbol, kotak.top + 5 + t1.height));
+  }
+
+  void _label(Canvas c, String s, Offset tengah, double ukuran) {
+    final tp = TextPainter(
+        text: TextSpan(text: s, style: TextStyle(fontSize: ukuran, color: merahTeks, fontWeight: FontWeight.bold)),
+        textDirection: TextDirection.ltr)
+      ..layout();
+    final r = Rect.fromCenter(center: tengah, width: tp.width + 8, height: tp.height + 4);
+    c.drawRect(r, Paint()..color = Colors.white);
+    tp.paint(c, Offset(r.left + 4, r.top + 2));
   }
 
   void _teks(Canvas c, String s, Offset o, double ukuran, Color warna, {bool bold = false, bool tengah = false}) {
