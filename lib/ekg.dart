@@ -168,10 +168,10 @@ List<int> panTompkins(List<double> x, double fs) {
   final sq = d.map((v) => v * v).toList();
   final mwi = rataGeser(sq, (0.15 * fs).round());
   // ambang dari bagian ini sendiri: puncak MWI di atas 35% persentil-98,
-  // jarak minimal 0,3 s (yang lebih kecil dianggap gelombang T dan dibuang)
+  // periode refrakter 0,2 s
   final urut = [...mwi]..sort();
   final ambang = 0.35 * urut[(n * 0.98).floor().clamp(0, n - 1)];
-  final refrakter = (0.3 * fs).round();
+  final refrakter = (0.2 * fs).round();
   final puncak = <int>[];
   final nilai = <double>[];
   for (var i = 1; i < n - 1; i++) {
@@ -188,6 +188,8 @@ List<int> panTompkins(List<double> x, double fs) {
       }
       continue;
     }
+    // gelombang T: muncul < 0,45 s setelah R dan energinya jauh lebih kecil
+    if (puncak.isNotEmpty && best - puncak.last < 0.45 * fs && mwi[i] < 0.6 * nilai.last) continue;
     puncak.add(best);
     nilai.add(mwi[i]);
   }
