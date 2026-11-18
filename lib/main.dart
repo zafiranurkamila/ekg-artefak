@@ -71,160 +71,61 @@ class _LayarState extends State<Layar> {
   @override
   Widget build(BuildContext context) {
     final s = _h.stat;
-    final durasi = _h.sinyal.length / _h.fs;
-    final durArt = _h.artefak.fold(0.0, (a, g) => a + g.selesai - g.mulai);
+    const mono = TextStyle(fontFamily: 'monospace', fontFamilyFallback: ['Courier New', 'Courier'], fontSize: 12.5, height: 1.45);
+    String r(String k, String v) => '${k.padRight(24)}: $v';
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: hijau,
-        foregroundColor: Colors.white,
-        title: const Text('Deteksi Artefak EKG', style: TextStyle(fontWeight: FontWeight.w700)),
-        actions: [
-          IconButton(
-              tooltip: 'Sinyal contoh',
-              icon: const Icon(Icons.refresh),
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
+        elevation: 0,
+        title: const Text('Deteksi Artefak EKG', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
+        bottom: const PreferredSize(preferredSize: Size.fromHeight(1), child: Divider(height: 1)),
+      ),
+      body: ListView(padding: const EdgeInsets.all(12), children: [
+        Row(children: [
+          Expanded(child: Text(_sumber, style: const TextStyle(fontSize: 12, color: Colors.black54))),
+          TextButton(
               onPressed: () => setState(() {
                     _h = analisis(sinyalContoh(), 250);
                     _sumber = 'Sinyal contoh · 20 detik · 250 Hz';
-                  })),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-          onPressed: _muat, backgroundColor: hijau, foregroundColor: Colors.white,
-          icon: const Icon(Icons.upload_file), label: const Text('Muat CSV')),
-      body: ListView(padding: const EdgeInsets.fromLTRB(12, 12, 12, 90), children: [
-        Text(_sumber, style: const TextStyle(color: Colors.black54, fontSize: 12.5)),
-        const SizedBox(height: 8),
-        _Kartu(
-          judul: 'Sinyal EKG',
-          isi: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Wrap(spacing: 14, runSpacing: 4, children: [
-              _Legenda(warna: Color(0xFFF2BDBD), teks: 'Artefak (dibuang)'),
-              _Legenda(warna: Color(0xFFDFF0E3), teks: 'Bersih'),
-              _Legenda(warna: Color(0xFF1F77B4), teks: 'Puncak R', segitiga: true),
-            ]),
-            const SizedBox(height: 8),
-            AspectRatio(aspectRatio: 1.9, child: CustomPaint(painter: Grafik(_h))),
-          ]),
-        ),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: _Angka('${s.hrRata.round()}', 'Rata-rata HR', 'bpm')),
-          const SizedBox(width: 8),
-          Expanded(child: _Angka('${s.hrMax.round()}/${s.hrMin.round()}', 'HR max/min', 'bpm')),
-          const SizedBox(width: 8),
-          Expanded(child: _Angka('${s.totalBeat}', 'Total beat', 'bersih')),
+                  }),
+              child: const Text('Contoh')),
+          OutlinedButton(onPressed: _muat, child: const Text('Muat CSV')),
         ]),
-        const SizedBox(height: 10),
-        _Kartu(
-          judul: 'Segmen Artefak',
-          ekor: Text('${_h.artefak.length} segmen · ${durArt.toStringAsFixed(1)} dari ${durasi.toStringAsFixed(0)} s',
-              style: const TextStyle(fontSize: 12, color: Colors.black54)),
-          isi: _h.artefak.isEmpty
-              ? const Text('Tidak ada artefak terdeteksi.')
-              : Column(children: [
-                  for (final (i, a) in _h.artefak.indexed)
-                    ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: CircleAvatar(radius: 14, backgroundColor: const Color(0xFFF8D7D7),
-                          child: Text('${i + 1}', style: const TextStyle(color: merah, fontWeight: FontWeight.bold, fontSize: 12))),
-                      title: Text('Mulai ${a.mulai.toStringAsFixed(2)} s  →  selesai ${a.selesai.toStringAsFixed(2)} s',
-                          style: const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Text('Durasi ${(a.selesai - a.mulai).toStringAsFixed(2)} s · tidak masuk perhitungan HR'),
-                    ),
-                ]),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(border: Border.all(color: Colors.black26)),
+          child: AspectRatio(aspectRatio: 1.7, child: CustomPaint(painter: Grafik(_h))),
         ),
-        const SizedBox(height: 10),
-        _Kartu(
-          judul: 'Dasbor Heart Rate',
-          isi: Column(children: [
-            _Baris('Total beat (bagian bersih)', '${s.totalBeat}'),
-            _Baris('HR max / min', '${s.hrMax.round()} / ${s.hrMin.round()} bpm'),
-            _Baris('Rata-rata HR', '${s.hrRata.round()} bpm'),
-            _Baris('Kejadian takikardia (>100 bpm)', '${s.tachy} interval'),
-            _Baris('Kejadian bradikardia (<60 bpm)', '${s.brady} interval'),
-            _Baris('Takikardia / bradikardia', '${s.persenTachy.toStringAsFixed(1)}% / ${s.persenBrady.toStringAsFixed(1)}%'),
-            _Baris('Interval R-R dipakai', '${s.jumlahInterval}'),
-          ]),
-        ),
-        const SizedBox(height: 10),
-        const _Kartu(
-          judul: 'Model AI (tahap berikutnya)',
-          isi: Text('Segmen artefak nantinya dibersihkan dengan model denoising (CDAE/LSTM-AE/Attention-AE) '
-              'sebelum dihitung ulang. Saat ini segmen artefak dibuang dari perhitungan.',
-              style: TextStyle(fontSize: 13, color: Colors.black87)),
+        const SizedBox(height: 4),
+        const Text('Merah: artefak (tidak dihitung)   Hijau: sinyal bersih   ▼ puncak R (Pan-Tompkins)',
+            style: TextStyle(fontSize: 11, color: Colors.black54)),
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(border: Border.all(color: const Color(0xFFE08080)), borderRadius: BorderRadius.circular(6)),
+          child: Text(
+            [
+              '=== DASBOR HEART RATE ===',
+              r('Total Beat', '${s.totalBeat}'),
+              r('HR Max/Min', '${s.hrMax.round()}/${s.hrMin.round()} bpm'),
+              r('Rata-rata HR', '${s.hrRata.round()} bpm'),
+              r('Kejadian Tachycardia', '${s.tachy} interval'),
+              r('Kejadian Bradycardia', '${s.brady} interval'),
+              r('Takikardia/Bradikardia', '${s.persenTachy.toStringAsFixed(1)}% / ${s.persenBrady.toStringAsFixed(1)}%'),
+              '',
+              '=== SEGMEN ARTEFAK ===',
+              if (_h.artefak.isEmpty) 'Tidak ada',
+              for (final (i, a) in _h.artefak.indexed)
+                '${i + 1}. ${a.mulai.toStringAsFixed(2)} s - ${a.selesai.toStringAsFixed(2)} s (${(a.selesai - a.mulai).toStringAsFixed(2)} s)',
+            ].join('\n'),
+            style: mono,
+          ),
         ),
       ]),
     );
   }
-}
-
-class _Kartu extends StatelessWidget {
-  final String judul;
-  final Widget isi;
-  final Widget? ekor;
-  const _Kartu({required this.judul, required this.isi, this.ekor});
-  @override
-  Widget build(BuildContext context) => Card(
-        elevation: 0,
-        color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              Expanded(child: Text(judul, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: hijau))),
-              if (ekor != null) ekor!,
-            ]),
-            const SizedBox(height: 10),
-            isi,
-          ]),
-        ),
-      );
-}
-
-class _Angka extends StatelessWidget {
-  final String nilai, label, satuan;
-  const _Angka(this.nilai, this.label, this.satuan);
-  @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(nilai, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: hijau)),
-          Text(satuan, style: const TextStyle(fontSize: 11, color: Colors.black45)),
-          const SizedBox(height: 2),
-          Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-        ]),
-      );
-}
-
-class _Baris extends StatelessWidget {
-  final String k, v;
-  const _Baris(this.k, this.v);
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 5),
-        child: Row(children: [
-          Expanded(child: Text(k, style: const TextStyle(color: Colors.black87))),
-          Text(v, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ]),
-      );
-}
-
-class _Legenda extends StatelessWidget {
-  final Color warna;
-  final String teks;
-  final bool segitiga;
-  const _Legenda({required this.warna, required this.teks, this.segitiga = false});
-  @override
-  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
-        segitiga
-            ? Icon(Icons.arrow_drop_down, color: warna, size: 22)
-            : Container(width: 14, height: 10, decoration: BoxDecoration(color: warna, borderRadius: BorderRadius.circular(2))),
-        const SizedBox(width: 4),
-        Text(teks, style: const TextStyle(fontSize: 12)),
-      ]);
 }
 
 class Grafik extends CustomPainter {

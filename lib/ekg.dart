@@ -167,28 +167,29 @@ List<int> panTompkins(List<double> x, double fs) {
       : (-bp[i - 2] - 2 * bp[i - 1] + 2 * bp[i + 1] + bp[i + 2]) * fs / 8);
   final sq = d.map((v) => v * v).toList();
   final mwi = rataGeser(sq, (0.15 * fs).round());
-  // ambang adaptif
-  var spk = 0.0, npk = 0.0;
-  final awal = mwi.sublist(0, min(n, (2 * fs).round()));
-  spk = awal.reduce(max) * 0.25;
-  npk = awal.reduce((a, b) => a + b) / awal.length * 0.5;
-  final refrakter = (0.2 * fs).round();
+  // ambang dari bagian ini sendiri: puncak MWI di atas 35% persentil-98,
+  // jarak minimal 0,3 s (yang lebih kecil dianggap gelombang T dan dibuang)
+  final urut = [...mwi]..sort();
+  final ambang = 0.35 * urut[(n * 0.98).floor().clamp(0, n - 1)];
+  final refrakter = (0.3 * fs).round();
   final puncak = <int>[];
+  final nilai = <double>[];
   for (var i = 1; i < n - 1; i++) {
-    if (!(mwi[i] > mwi[i - 1] && mwi[i] >= mwi[i + 1])) continue;
-    final ambang = npk + 0.25 * (spk - npk);
-    if (mwi[i] > ambang && (puncak.isEmpty || i - puncak.last > refrakter)) {
-      // cari puncak R pada sinyal asli di sekitar (MWI tertunda ~ setengah jendela)
-      final a = max(0, i - (0.2 * fs).round()), z = min(n, i + (0.05 * fs).round());
-      var best = a;
-      for (var j = a; j < z; j++) {
-        if (bp[j].abs() > bp[best].abs()) best = j;
-      }
-      puncak.add(best);
-      spk = 0.125 * mwi[i] + 0.875 * spk;
-    } else {
-      npk = 0.125 * mwi[i] + 0.875 * npk;
+    if (!(mwi[i] > mwi[i - 1] && mwi[i] >= mwi[i + 1]) || mwi[i] < ambang) continue;
+    final a = max(0, i - (0.2 * fs).round()), z = min(n, i + (0.05 * fs).round());
+    var best = a;
+    for (var j = a; j < z; j++) {
+      if (bp[j].abs() > bp[best].abs()) best = j;
     }
+    if (puncak.isNotEmpty && best - puncak.last < refrakter) {
+      if (mwi[i] > nilai.last) {
+        puncak[puncak.length - 1] = best;
+        nilai[nilai.length - 1] = mwi[i];
+      }
+      continue;
+    }
+    puncak.add(best);
+    nilai.add(mwi[i]);
   }
   return puncak;
 }
@@ -215,9 +216,20 @@ Statistik hitungStatistik(List<int> r, double fs, List<Segmen> artefak) {
 
 HasilAnalisis analisis(List<double> x, double fs) {
   final art = deteksiArtefak(x, fs);
-  final semua = panTompkins(x, fs);
-  // abaikan juga 0,2 s setelah artefak selesai agar lonjakan di batas tidak dihitung sebagai R
-  final r = semua.where((i) => !art.any((s) => i / fs >= s.mulai && i / fs < s.selesai + 0.2)).toList();
+  // Pan-Tompkins dijalankan terpisah di tiap bagian bersih (>= 1,5 s)
+  final r = <int>[];
+  var awal = 0.0;
+  final batas = [...art, Segmen(x.length / fs, x.length / fs)];
+  for (final sg in batas) {
+    final m = (awal * fs).round(), z = (sg.mulai * fs).round();
+    if (z - m >= 1.5 * fs) {
+      for (final i in panTompkins(x.sublist(m, z), fs)) {
+        final t = (m + i) / fs;
+        if (t > awal + 0.2 || awal == 0) r.add(m + i); // lewati 0,2 s pertama setelah artefak
+      }
+    }
+    awal = sg.selesai;
+  }
   return HasilAnalisis(x, fs, art, r, hitungStatistik(r, fs, art));
 }
 
