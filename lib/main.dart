@@ -198,7 +198,7 @@ class _LayarState extends State<Layar> {
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               const Text('Bersihkan artefak (model CDAE)', style: TextStyle(fontWeight: FontWeight.w600, color: tinta)),
-              Text(_model.isEmpty ? 'Memuat model...' : 'Model: ${_model.keys.join(', ').toUpperCase()} · dari Zaskia',
+              Text(_model.isEmpty ? 'Memuat model...' : 'Denoising untuk noise ${_model.keys.join(', ').toUpperCase()}',
                   style: const TextStyle(color: redup, fontSize: 12)),
             ]),
           ),
