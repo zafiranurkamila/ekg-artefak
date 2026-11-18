@@ -38,8 +38,17 @@ jobs:
           # cek versi: index.html bisa di-cache 10 menit oleh GitHub Pages,
           # jadi halaman membandingkan dirinya dengan version.txt (selalu diambil baru)
           echo -n "$V" > build/web/version.txt
-          CEK="<script>(function(){var V='$V';fetch('version.txt?t='+Date.now(),{cache:'no-store'}).then(function(r){return r.text()}).then(function(v){v=v.trim();if(v&&v!==V&&location.search.indexOf('v='+v)<0){location.replace(location.pathname+'?v='+v)}}).catch(function(){})})();</script>"
-          sed -i "s#<head>#<head>$CEK#" build/web/index.html
+          python3 - "$V" <<'PY'
+          import sys
+          v = sys.argv[1]
+          cek = ("<script>(function(){var V='%s';fetch('version.txt?t='+Date.now(),{cache:'no-store'})"
+                 ".then(function(r){return r.text()}).then(function(n){n=n.trim();"
+                 "if(n&&n!==V&&location.search.indexOf('v='+n)<0){location.replace(location.pathname+'?v='+n)}})"
+                 ".catch(function(){})})();</script>") % v
+          p = "build/web/index.html"
+          s = open(p).read().replace("<head>", "<head>" + cek, 1)
+          open(p, "w").write(s)
+          PY
           grep -c "version.txt" build/web/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
