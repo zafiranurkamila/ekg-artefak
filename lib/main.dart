@@ -3,15 +3,28 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'ekg.dart';
 
-const hijau = Color(0xFF14724A);
-const merah = Color(0xFFC62828);
+// palet mengikuti contoh: krem, hijau zaitun, aksen oranye
+const krem = Color(0xFFF7F3EA);
+const zaitun = Color(0xFF5B7B3A);
+const zaitunTua = Color(0xFF3E5A26);
+const zaitunMuda = Color(0xFFE8EED9);
+const oranye = Color(0xFFE07B39);
+const merahLembut = Color(0xFFF6D3CC);
+const tinta = Color(0xFF2B2B22);
+const redup = Color(0xFF7A7A6E);
 
 void main() => runApp(MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Deteksi Artefak EKG',
-      theme: ThemeData(colorSchemeSeed: hijau, useMaterial3: true, scaffoldBackgroundColor: const Color(0xFFF4F7F5)),
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: zaitun, scaffoldBackgroundColor: krem),
       home: const Layar(),
     ));
+
+BoxDecoration kartu([Color warna = Colors.white]) => BoxDecoration(
+      color: warna,
+      borderRadius: BorderRadius.circular(22),
+      boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 6))],
+    );
 
 class Layar extends StatefulWidget {
   const Layar({super.key});
@@ -22,13 +35,21 @@ class Layar extends StatefulWidget {
 class _LayarState extends State<Layar> {
   double _fs = 250;
   late HasilAnalisis _h;
-  String _sumber = 'Sinyal contoh · 20 detik · 250 Hz';
+  String _nama = 'Rekaman contoh';
+  String _info = '20 detik · 250 Hz';
+  int _tab = 0;
 
   @override
   void initState() {
     super.initState();
     _h = analisis(sinyalContoh(), 250);
   }
+
+  void _contoh() => setState(() {
+        _h = analisis(sinyalContoh(), 250);
+        _nama = 'Rekaman contoh';
+        _info = '20 detik · 250 Hz';
+      });
 
   Future<void> _muat() async {
     final fs = await _tanyaFs();
@@ -43,7 +64,9 @@ class _LayarState extends State<Layar> {
       setState(() {
         _fs = fs;
         _h = analisis(x, fs);
-        _sumber = '${f.name} · ${(x.length / fs).toStringAsFixed(1)} detik · ${fs.round()} Hz';
+        _nama = f.name;
+        _info = '${(x.length / fs).toStringAsFixed(1)} detik · ${fs.round()} Hz';
+        _tab = 0;
       });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal memuat: $e')));
@@ -52,78 +75,317 @@ class _LayarState extends State<Layar> {
 
   Future<double?> _tanyaFs() {
     final c = TextEditingController(text: _fs.round().toString());
-    return showDialog<double>(
+    return showModalBottomSheet<double>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Frekuensi sampling'),
-        content: TextField(
-            controller: c,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(suffixText: 'Hz', helperText: 'File CSV: 1 kolom amplitudo (mV), atau waktu,amplitudo')),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, double.tryParse(c.text.replaceAll(',', '.'))), child: const Text('Pilih file')),
-        ],
+      isScrollControlled: true,
+      backgroundColor: krem,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(26))),
+      builder: (ctx) => Padding(
+        padding: EdgeInsets.fromLTRB(20, 18, 20, 20 + MediaQuery.of(ctx).viewInsets.bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Muat Rekaman', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: tinta)),
+          const SizedBox(height: 4),
+          const Text('File CSV berisi 1 kolom amplitudo (mV), atau waktu,amplitudo.',
+              style: TextStyle(color: redup, fontSize: 13)),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: kartu(),
+            child: TextField(
+              controller: c,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(border: InputBorder.none, labelText: 'Frekuensi sampling', suffixText: 'Hz'),
+            ),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: _TombolPil(
+                teks: 'Pilih File CSV',
+                ikon: Icons.upload_file_rounded,
+                onTap: () => Navigator.pop(ctx, double.tryParse(c.text.replaceAll(',', '.')))),
+          ),
+        ]),
       ),
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    final s = _h.stat;
-    const mono = TextStyle(fontFamily: 'monospace', fontFamilyFallback: ['Courier New', 'Courier'], fontSize: 12.5, height: 1.45);
-    String r(String k, String v) => '${k.padRight(24)}: $v';
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
-        elevation: 0,
-        title: const Text('Deteksi Artefak EKG', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600)),
-        bottom: const PreferredSize(preferredSize: Size.fromHeight(1), child: Divider(height: 1)),
-      ),
-      body: ListView(padding: const EdgeInsets.all(12), children: [
-        Row(children: [
-          Expanded(child: Text(_sumber, style: const TextStyle(fontSize: 12, color: Colors.black54))),
-          TextButton(
-              onPressed: () => setState(() {
-                    _h = analisis(sinyalContoh(), 250);
-                    _sumber = 'Sinyal contoh · 20 detik · 250 Hz';
-                  }),
-              child: const Text('Contoh')),
-          OutlinedButton(onPressed: _muat, child: const Text('Muat CSV')),
+  Widget build(BuildContext context) => Scaffold(
+        body: SafeArea(child: _tab == 0 ? _beranda() : _caraKerja()),
+        bottomNavigationBar: _NavBawah(index: _tab, onPilih: (i) => setState(() => _tab = i), onTambah: _muat),
+      );
+
+  Widget _judul(String t, [Widget? ekor]) => Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(children: [
+          Expanded(child: Text(t, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: tinta))),
+          if (ekor != null) ekor,
         ]),
-        const SizedBox(height: 6),
-        Container(
-          decoration: BoxDecoration(border: Border.all(color: Colors.black26)),
-          child: AspectRatio(aspectRatio: 1.7, child: CustomPaint(painter: Grafik(_h))),
+      );
+
+  Widget _beranda() {
+    final s = _h.stat;
+    final durasi = _h.sinyal.length / _h.fs;
+    final durArt = _h.artefak.fold(0.0, (a, g) => a + g.selesai - g.mulai);
+    return ListView(padding: const EdgeInsets.fromLTRB(18, 14, 18, 24), children: [
+      Row(children: [
+        const Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Halo, Dok', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: tinta)),
+            SizedBox(height: 2),
+            Text('Cek kualitas rekaman EKG hari ini', style: TextStyle(color: redup, fontSize: 13)),
+          ]),
         ),
-        const SizedBox(height: 4),
-        const Text('Merah: artefak (tidak dihitung)   Hijau: sinyal bersih   ▼ puncak R (Pan-Tompkins)',
-            style: TextStyle(fontSize: 11, color: Colors.black54)),
-        const SizedBox(height: 14),
         Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(border: Border.all(color: const Color(0xFFE08080)), borderRadius: BorderRadius.circular(6)),
-          child: Text(
-            [
-              '=== DASBOR HEART RATE ===',
-              r('Total Beat', '${s.totalBeat}'),
-              r('HR Max/Min', '${s.hrMax.round()}/${s.hrMin.round()} bpm'),
-              r('Rata-rata HR', '${s.hrRata.round()} bpm'),
-              r('Kejadian Tachycardia', '${s.tachy} interval'),
-              r('Kejadian Bradycardia', '${s.brady} interval'),
-              r('Takikardia/Bradikardia', '${s.persenTachy.toStringAsFixed(1)}% / ${s.persenBrady.toStringAsFixed(1)}%'),
-              '',
-              '=== SEGMEN ARTEFAK ===',
-              if (_h.artefak.isEmpty) 'Tidak ada',
-              for (final (i, a) in _h.artefak.indexed)
-                '${i + 1}. ${a.mulai.toStringAsFixed(2)} s - ${a.selesai.toStringAsFixed(2)} s (${(a.selesai - a.mulai).toStringAsFixed(2)} s)',
-            ].join('\n'),
-            style: mono,
-          ),
+          width: 46,
+          height: 46,
+          decoration: kartu(zaitunMuda),
+          child: const Icon(Icons.monitor_heart_rounded, color: zaitun),
         ),
       ]),
+      const SizedBox(height: 18),
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: kartu(zaitunMuda),
+        child: Row(children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(_nama, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: zaitunTua)),
+              const SizedBox(height: 2),
+              Text(_info, style: const TextStyle(color: zaitunTua, fontSize: 13)),
+              const SizedBox(height: 12),
+              _TombolPil(teks: 'Ganti rekaman', ikon: Icons.swap_horiz_rounded, kecil: true, onTap: _muat),
+            ]),
+          ),
+          const SizedBox(width: 10),
+          Container(
+            width: 74,
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
+            child: Column(children: [
+              Text('${_h.artefak.length}', style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: oranye)),
+              const Text('artefak', style: TextStyle(fontSize: 11, color: redup)),
+            ]),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 18),
+      _judul('Sinyal EKG', TextButton(onPressed: _contoh, child: const Text('Pakai contoh', style: TextStyle(color: oranye)))),
+      Container(
+        padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+        decoration: kartu(),
+        child: Column(children: [
+          AspectRatio(aspectRatio: 1.75, child: CustomPaint(painter: Grafik(_h))),
+          const SizedBox(height: 8),
+          const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            _Titik(warna: Color(0xFFF2B8AC), teks: 'Artefak'),
+            SizedBox(width: 14),
+            _Titik(warna: Color(0xFFDCE6C6), teks: 'Bersih'),
+            SizedBox(width: 14),
+            _Titik(warna: Color(0xFF3C7DBF), teks: 'Puncak R'),
+          ]),
+        ]),
+      ),
+      const SizedBox(height: 18),
+      _judul('Detak Jantung'),
+      Container(
+        padding: const EdgeInsets.all(16),
+        decoration: kartu(),
+        child: Column(children: [
+          Row(children: [
+            Expanded(child: _Detail(ikon: Icons.favorite_rounded, label: 'Rata-rata', nilai: '${s.hrRata.round()} bpm')),
+            Expanded(child: _Detail(ikon: Icons.swap_vert_rounded, label: 'Max / Min', nilai: '${s.hrMax.round()} / ${s.hrMin.round()}')),
+          ]),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(child: _Detail(ikon: Icons.speed_rounded, label: 'Takikardia', nilai: '${s.tachy} interval')),
+            Expanded(child: _Detail(ikon: Icons.hourglass_bottom_rounded, label: 'Bradikardia', nilai: '${s.brady} interval')),
+          ]),
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(child: _Detail(ikon: Icons.graphic_eq_rounded, label: 'Total beat', nilai: '${s.totalBeat} beat')),
+            Expanded(
+                child: _Detail(
+                    ikon: Icons.pie_chart_rounded,
+                    label: 'Taki / Bradi',
+                    nilai: '${s.persenTachy.toStringAsFixed(0)}% / ${s.persenBrady.toStringAsFixed(0)}%')),
+          ]),
+        ]),
+      ),
+      const SizedBox(height: 18),
+      _judul('Segmen Artefak',
+          Text('${durArt.toStringAsFixed(1)} dari ${durasi.toStringAsFixed(0)} detik', style: const TextStyle(color: redup, fontSize: 12.5))),
+      if (_h.artefak.isEmpty)
+        Container(
+            padding: const EdgeInsets.all(16),
+            decoration: kartu(),
+            child: const Text('Tidak ada artefak. Semua sinyal dihitung.', style: TextStyle(color: zaitunTua))),
+      for (final (i, a) in _h.artefak.indexed)
+        Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.all(14),
+          decoration: kartu(),
+          child: Row(children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(color: merahLembut, borderRadius: BorderRadius.circular(14)),
+              alignment: Alignment.center,
+              child: Text('${i + 1}', style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFFB4442C), fontSize: 16)),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${a.mulai.toStringAsFixed(2)} s  –  ${a.selesai.toStringAsFixed(2)} s',
+                    style: const TextStyle(fontWeight: FontWeight.w700, color: tinta)),
+                const SizedBox(height: 2),
+                const Text('Tidak masuk perhitungan HR', style: TextStyle(color: redup, fontSize: 12.5)),
+              ]),
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: zaitunMuda, borderRadius: BorderRadius.circular(20)),
+              child: Text('${(a.selesai - a.mulai).toStringAsFixed(1)} s',
+                  style: const TextStyle(color: zaitunTua, fontWeight: FontWeight.w600, fontSize: 12.5)),
+            ),
+          ]),
+        ),
+    ]);
+  }
+
+  Widget _caraKerja() => ListView(padding: const EdgeInsets.all(18), children: [
+        const Text('Cara Kerja', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: tinta)),
+        const SizedBox(height: 14),
+        for (final (j, d) in const [
+          ('1. Deteksi artefak', 'Seluruh rekaman dipindai tiap 0,1 detik. Bagian dengan noise gerak, otot/elektroda, atau baseline bergeser ditandai beserta waktu mulai dan selesainya.'),
+          ('2. Puncak R', 'Pan-Tompkins dijalankan hanya di bagian bersih. Gelombang T tidak dihitung sebagai detak.'),
+          ('3. Heart rate', 'Interval R-R yang melewati artefak dibuang supaya hasil tidak menyimpang dari standar.'),
+          ('4. Model AI (berikutnya)', 'Bagian artefak dibersihkan dengan model denoising (CDAE, LSTM-AE, Attention-AE) lalu dihitung ulang.'),
+        ])
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.all(16),
+            decoration: kartu(),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(j, style: const TextStyle(fontWeight: FontWeight.w700, color: zaitunTua, fontSize: 15)),
+              const SizedBox(height: 6),
+              Text(d, style: const TextStyle(color: tinta, height: 1.4)),
+            ]),
+          ),
+      ]);
+}
+
+class _TombolPil extends StatelessWidget {
+  final String teks;
+  final IconData ikon;
+  final VoidCallback onTap;
+  final bool kecil;
+  const _TombolPil({required this.teks, required this.ikon, required this.onTap, this.kecil = false});
+  @override
+  Widget build(BuildContext context) => Material(
+        color: zaitunTua,
+        borderRadius: BorderRadius.circular(30),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(30),
+          onTap: onTap,
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: kecil ? 14 : 20, vertical: kecil ? 9 : 15),
+            child: Row(mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(ikon, color: Colors.white, size: kecil ? 17 : 20),
+              const SizedBox(width: 8),
+              Text(teks, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: kecil ? 13 : 15)),
+            ]),
+          ),
+        ),
+      );
+}
+
+class _Detail extends StatelessWidget {
+  final IconData ikon;
+  final String label, nilai;
+  const _Detail({required this.ikon, required this.label, required this.nilai});
+  @override
+  Widget build(BuildContext context) => Row(children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(color: zaitunMuda, borderRadius: BorderRadius.circular(13)),
+          child: Icon(ikon, color: zaitun, size: 22),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(label, style: const TextStyle(color: redup, fontSize: 12)),
+            Text(nilai, style: const TextStyle(fontWeight: FontWeight.w700, color: tinta, fontSize: 14.5)),
+          ]),
+        ),
+      ]);
+}
+
+class _Titik extends StatelessWidget {
+  final Color warna;
+  final String teks;
+  const _Titik({required this.warna, required this.teks});
+  @override
+  Widget build(BuildContext context) => Row(mainAxisSize: MainAxisSize.min, children: [
+        Container(width: 10, height: 10, decoration: BoxDecoration(color: warna, shape: BoxShape.circle)),
+        const SizedBox(width: 5),
+        Text(teks, style: const TextStyle(fontSize: 12, color: redup)),
+      ]);
+}
+
+class _NavBawah extends StatelessWidget {
+  final int index;
+  final ValueChanged<int> onPilih;
+  final VoidCallback onTambah;
+  const _NavBawah({required this.index, required this.onPilih, required this.onTambah});
+  @override
+  Widget build(BuildContext context) {
+    Widget item(int i, IconData ik, String t) => Expanded(
+          child: InkWell(
+            onTap: () => onPilih(i),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Icon(ik, color: index == i ? zaitunTua : redup),
+                Text(t,
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        color: index == i ? zaitunTua : redup,
+                        fontWeight: index == i ? FontWeight.w700 : FontWeight.w400)),
+              ]),
+            ),
+          ),
+        );
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        boxShadow: [BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, -4))],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(children: [
+          item(0, Icons.home_rounded, 'Beranda'),
+          Expanded(
+            child: Center(
+              child: InkWell(
+                onTap: onTambah,
+                customBorder: const CircleBorder(),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  width: 50,
+                  height: 50,
+                  decoration: const BoxDecoration(color: zaitunTua, shape: BoxShape.circle),
+                  child: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
+                ),
+              ),
+            ),
+          ),
+          item(1, Icons.info_outline_rounded, 'Cara kerja'),
+        ]),
+      ),
     );
   }
 }
@@ -134,37 +396,33 @@ class Grafik extends CustomPainter {
 
   @override
   void paint(Canvas c, Size size) {
-    const kiri = 26.0, bawah = 18.0, atas = 4.0, kanan = 4.0;
+    const kiri = 22.0, bawah = 18.0, atas = 4.0, kanan = 4.0;
     final w = size.width - kiri - kanan, ht = size.height - atas - bawah;
     final durasi = h.sinyal.length / h.fs;
     const lo = -4.0, hi = 4.0;
     double px(double t) => kiri + t / durasi * w;
     double py(double v) => atas + (hi - v.clamp(lo, hi)) / (hi - lo) * ht;
+    final area = RRect.fromRectAndRadius(Rect.fromLTWH(kiri, atas, w, ht), const Radius.circular(12));
 
-    c.drawRect(Rect.fromLTWH(kiri, atas, w, ht), Paint()..color = const Color(0xFFDFF0E3));
+    c.save();
+    c.clipRRect(area);
+    c.drawRect(area.outerRect, Paint()..color = const Color(0xFFEFF4E4));
     for (final s in h.artefak) {
-      c.drawRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht), Paint()..color = const Color(0xFFF2BDBD));
+      c.drawRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht), Paint()..color = const Color(0xFFF8D9D1));
       if (px(s.selesai) - px(s.mulai) > 40) {
-        _teks(c, 'ARTEFAK', Offset((px(s.mulai) + px(s.selesai)) / 2, atas + 4), 9, merah, bold: true, tengah: true);
+        _teks(c, 'ARTEFAK', Offset((px(s.mulai) + px(s.selesai)) / 2, atas + 5), 8.5, const Color(0xFFB4442C),
+            bold: true, tengah: true);
       }
     }
     final garis = Paint()
-      ..color = Colors.black26
+      ..color = const Color(0x22000000)
       ..strokeWidth = 0.8;
     final langkahGrid = durasi > 40 ? 10.0 : (durasi > 12 ? 2.0 : 1.0);
-    for (var t = 0.0; t <= durasi + 1e-9; t += langkahGrid) {
+    for (var t = langkahGrid; t < durasi; t += langkahGrid) {
       for (var y = atas; y < atas + ht; y += 6) {
         c.drawLine(Offset(px(t), y), Offset(px(t), y + 3), garis);
       }
-      if ((t / langkahGrid) % (w < 500 ? 2 : 1) == 0) {
-        _teks(c, t.toStringAsFixed(0), Offset(px(t), atas + ht + 3), 9, Colors.black54, tengah: true);
-      }
     }
-    for (final v in [-2.0, 0.0, 2.0]) {
-      _teks(c, v.toStringAsFixed(0), Offset(kiri - 14, py(v) - 6), 9, Colors.black54);
-    }
-
-    // sinyal: ambil min/max tiap piksel agar noise tetap terlihat walau grafik kecil
     final p = Path();
     final perPx = h.sinyal.length / w;
     for (var k = 0; k < w; k++) {
@@ -182,12 +440,20 @@ class Grafik extends CustomPainter {
     c.drawPath(p, Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.9
-      ..color = Colors.black87);
-
-    final biru = Paint()..color = const Color(0xFF1F77B4);
+      ..color = tinta);
+    final biru = Paint()..color = const Color(0xFF3C7DBF);
     for (final i in h.puncakR) {
       final x = px(i / h.fs), y = py(h.sinyal[i]) - 3;
       c.drawPath(Path()..moveTo(x - 4, y - 7)..lineTo(x + 4, y - 7)..lineTo(x, y)..close(), biru);
+    }
+    c.restore();
+    for (var t = 0.0; t <= durasi + 1e-9; t += langkahGrid) {
+      if ((t / langkahGrid) % (w < 500 ? 2 : 1) == 0) {
+        _teks(c, t.toStringAsFixed(0), Offset(px(t), atas + ht + 4), 9, redup, tengah: true);
+      }
+    }
+    for (final v in [-2.0, 0.0, 2.0]) {
+      _teks(c, v.toStringAsFixed(0), Offset(kiri - 13, py(v) - 6), 9, redup);
     }
   }
 
