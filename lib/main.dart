@@ -147,21 +147,7 @@ class _LayarState extends State<Layar> {
     final durasi = _h.sinyal.length / _h.fs;
     final durArt = _h.artefak.fold(0.0, (a, g) => a + g.selesai - g.mulai);
     return ListView(padding: const EdgeInsets.fromLTRB(18, 14, 18, 24), children: [
-      Row(children: [
-        const Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Halo, Dok', style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, color: tinta)),
-            SizedBox(height: 2),
-            Text('Cek kualitas rekaman EKG hari ini', style: TextStyle(color: redup, fontSize: 13)),
-          ]),
-        ),
-        Container(
-          width: 46,
-          height: 46,
-          decoration: kartu(zaitunMuda),
-          child: const Icon(Icons.monitor_heart_rounded, color: zaitun),
-        ),
-      ]),
+      const Text('Deteksi Artefak EKG', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: tinta)),
       const SizedBox(height: 18),
       Container(
         padding: const EdgeInsets.all(16),
@@ -193,11 +179,9 @@ class _LayarState extends State<Layar> {
         padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
         decoration: kartu(),
         child: Row(children: [
-          const Icon(Icons.auto_fix_high_rounded, color: zaitun),
-          const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Bersihkan artefak (model CDAE)', style: TextStyle(fontWeight: FontWeight.w600, color: tinta)),
+              const Text('Bersihkan artefak dengan model CDAE', style: TextStyle(fontWeight: FontWeight.w600, color: tinta)),
               Text(_model.isEmpty ? 'Memuat model...' : 'Denoising untuk noise ${_model.keys.join(', ').toUpperCase()}',
                   style: const TextStyle(color: redup, fontSize: 12)),
             ]),
@@ -219,18 +203,6 @@ class _LayarState extends State<Layar> {
         decoration: kartu(),
         child: Column(children: [
           AspectRatio(aspectRatio: 1.45, child: CustomPaint(painter: Grafik(_h))),
-          const SizedBox(height: 8),
-          const Wrap(alignment: WrapAlignment.center, runSpacing: 4, children: [
-            _Titik(warna: Color(0xFFF2BDBD), teks: 'Artefak'),
-            SizedBox(width: 14),
-            _Titik(warna: Color(0xFFCFE6CF), teks: 'Bersih'),
-            SizedBox(width: 14),
-            _Titik(warna: Color(0xFF1F77B4), teks: 'Puncak R'),
-            SizedBox(width: 14),
-            _Titik(warna: Color(0xFF1C211E), teks: 'PVC'),
-            SizedBox(width: 14),
-            _Titik(warna: Color(0xFF1C211E), teks: 'PAC'),
-          ]),
         ]),
       ),
       const SizedBox(height: 18),
@@ -341,24 +313,14 @@ class _TombolPil extends StatelessWidget {
 }
 
 class _Detail extends StatelessWidget {
-  final IconData ikon;
+  final IconData ikon; // tidak ditampilkan, dibiarkan agar pemanggil tidak berubah
   final String label, nilai;
   const _Detail({required this.ikon, required this.label, required this.nilai});
   @override
-  Widget build(BuildContext context) => Row(children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(color: zaitunMuda, borderRadius: BorderRadius.circular(13)),
-          child: Icon(ikon, color: zaitun, size: 22),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(label, style: const TextStyle(color: redup, fontSize: 12)),
-            Text(nilai, style: const TextStyle(fontWeight: FontWeight.w700, color: tinta, fontSize: 14.5)),
-          ]),
-        ),
+  Widget build(BuildContext context) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label, style: const TextStyle(color: redup, fontSize: 12.5)),
+        const SizedBox(height: 2),
+        Text(nilai, style: const TextStyle(fontWeight: FontWeight.w700, color: tinta, fontSize: 16)),
       ]);
 }
 
