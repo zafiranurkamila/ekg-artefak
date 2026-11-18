@@ -40,7 +40,7 @@ class _LayarState extends State<Layar> {
   double _fs = 250;
   List<double> _x = sinyalContoh();
   late HasilAnalisis _h;
-  String _nama = 'Rekaman contoh';
+  String _nama = 'Sinyal buatan';
   String _info = '20 detik, 250 Hz';
   final Map<String, Cdae> _model = {};
   bool _pakaiModel = false;
@@ -63,13 +63,74 @@ class _LayarState extends State<Layar> {
 
   void _hitung() => _h = _pakaiModel && _model.isNotEmpty ? analisisDenganModel(_x, _fs, _model) : analisis(_x, _fs);
 
-  void _contoh() => setState(() {
-        _x = sinyalContoh();
-        _fs = 250;
-        _hitung();
-        _nama = 'Rekaman contoh';
-        _info = '20 detik, 250 Hz';
-      });
+  static const _pilihanContoh = [
+    ('Sinyal buatan', 'Noise gerak, otot, dan baseline', ''),
+    ('INCART bersih', 'Rekaman asli tanpa noise tambahan', 'incart_I01_bersih'),
+    ('INCART + noise elektroda (EM)', 'Noise di 3 sampai 6 s dan 12,5 sampai 15 s', 'incart_I01_em'),
+    ('INCART + noise otot (MA)', 'Noise di 3 sampai 6 s dan 12,5 sampai 15 s', 'incart_I01_ma'),
+    ('INCART + baseline wander (BW)', 'Noise di 3 sampai 6 s dan 12,5 sampai 15 s', 'incart_I01_bw'),
+  ];
+
+  Future<void> _contoh() async {
+    final pilih = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Rekaman contoh', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: hijauGelap)),
+            const SizedBox(height: 4),
+            const Text('INCART dan noise NSTDB dari PhysioNet, 257 Hz, 20 detik.', style: TextStyle(color: redup, fontSize: 12.5)),
+            const SizedBox(height: 14),
+            for (final (i, (judul, ket, _)) in _pilihanContoh.indexed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Material(
+                  color: _nama == judul ? const Color(0xFFDDEFE3) : const Color(0xFFF2F5F3),
+                  borderRadius: BorderRadius.circular(20),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () => Navigator.pop(ctx, i),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                      child: Row(children: [
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                            Text(judul, style: const TextStyle(fontWeight: FontWeight.w700, color: hijauGelap)),
+                            Text(ket, style: const TextStyle(color: redup, fontSize: 12)),
+                          ]),
+                        ),
+                        if (_nama == judul) const Icon(Icons.check_rounded, color: zaitun),
+                      ]),
+                    ),
+                  ),
+                ),
+              ),
+          ]),
+        ),
+      ),
+    );
+    if (pilih == null) return;
+    final (judul, _, file) = _pilihanContoh[pilih];
+    List<double> x;
+    double fs;
+    if (file.isEmpty) {
+      x = sinyalContoh();
+      fs = 250;
+    } else {
+      x = bacaCsv(await rootBundle.loadString('contoh_csv/$file.csv'));
+      fs = 257;
+    }
+    setState(() {
+      _x = x;
+      _fs = fs;
+      _hitung();
+      _nama = judul;
+      _info = '${(x.length / fs).toStringAsFixed(0)} detik, ${fs.round()} Hz';
+    });
+  }
 
   Future<void> _muat() async {
     final fs = await _tanyaFs();
@@ -177,7 +238,7 @@ class _LayarState extends State<Layar> {
         Expanded(
           child: Text('$_nama, $_info', style: const TextStyle(color: redup, fontSize: 13), overflow: TextOverflow.ellipsis),
         ),
-        _Pil(teks: 'Contoh', onTap: _contoh),
+        _Pil(teks: 'Pilih contoh', onTap: _contoh),
       ]),
       const SizedBox(height: 26),
 
