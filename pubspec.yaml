@@ -1,0 +1,12 @@
+name: ekg_artefak
+description: Prototipe deteksi artefak EKG dan heart rate (Pan-Tompkins).
+publish_to: none
+version: 0.1.0
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+dependencies:
+  flutter:
+    sdk: flutter
+  file_picker: ^8.1.2
+flutter:
+  uses-material-design: true
