@@ -41,7 +41,7 @@ class _LayarState extends State<Layar> {
   List<double> _x = sinyalContoh();
   late HasilAnalisis _h;
   String _nama = 'Rekaman contoh';
-  String _info = '20 detik · 250 Hz';
+  String _info = '20 detik, 250 Hz';
   final Map<String, Cdae> _model = {};
   bool _pakaiModel = false;
 
@@ -68,7 +68,7 @@ class _LayarState extends State<Layar> {
         _fs = 250;
         _hitung();
         _nama = 'Rekaman contoh';
-        _info = '20 detik · 250 Hz';
+        _info = '20 detik, 250 Hz';
       });
 
   Future<void> _muat() async {
@@ -86,7 +86,7 @@ class _LayarState extends State<Layar> {
         _x = x;
         _hitung();
         _nama = f.name;
-        _info = '${(x.length / fs).toStringAsFixed(1)} detik · ${fs.round()} Hz';
+        _info = '${(x.length / fs).toStringAsFixed(1)} detik, ${fs.round()} Hz';
       });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal memuat: $e')));
@@ -175,7 +175,7 @@ class _LayarState extends State<Layar> {
       const SizedBox(height: 14),
       Row(children: [
         Expanded(
-          child: Text('$_nama · $_info', style: const TextStyle(color: redup, fontSize: 13), overflow: TextOverflow.ellipsis),
+          child: Text('$_nama, $_info', style: const TextStyle(color: redup, fontSize: 13), overflow: TextOverflow.ellipsis),
         ),
         _Pil(teks: 'Contoh', onTap: _contoh),
       ]),
@@ -261,8 +261,8 @@ class _LayarState extends State<Layar> {
       _Baris('Rata-rata detak jantung', '${s.hrRata.round()} bpm', statusHr(s.hrRata)),
       _Baris('Detak tertinggi', '${s.hrMax.round()} bpm', statusHr(s.hrMax)),
       _Baris('Detak terendah', '${s.hrMin.round()} bpm', statusHr(s.hrMin)),
-      _Baris('Takikardia (> 100 bpm)', '${s.tachy} interval · ${s.persenTachy.toStringAsFixed(0)}%', ada(s.tachy)),
-      _Baris('Bradikardia (< 60 bpm)', '${s.brady} interval · ${s.persenBrady.toStringAsFixed(0)}%', ada(s.brady)),
+      _Baris('Takikardia (> 100 bpm)', '${s.tachy} interval (${s.persenTachy.toStringAsFixed(0)}%)', ada(s.tachy)),
+      _Baris('Bradikardia (< 60 bpm)', '${s.brady} interval (${s.persenBrady.toStringAsFixed(0)}%)', ada(s.brady)),
       Padding(
         padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
         child: Text('Dihitung dari ${s.totalBeat} detak dan ${s.jumlahInterval} interval R-R. Hasil ini bukan diagnosis.',

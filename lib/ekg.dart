@@ -126,30 +126,52 @@ List<double> sinyalContoh({double fs = 250, double durasi = 20, int seed = 7}) {
 }
 
 // ---------------------------------------------------------------- artefak
-/// Deteksi waktu mulai dan selesai artefak dengan resolusi 0,1 detik.
+/// Deteksi waktu mulai dan selesai artefak, resolusi 0,1 detik.
+/// Semua ambang relatif terhadap rekaman itu sendiri (bukan angka tetap),
+/// sudah diuji pada INCART + noise NSTDB (em, ma, bw) dan pada sinyal contoh.
 /// Jendela 0,25 s digeser tiap 0,1 s, dianggap noise bila:
-/// - banyak titik balik besar (noise gerak/otot; QRS normal hanya 3-4 titik balik), atau
-/// - garis dasar (median) menyimpang jauh dari garis dasar global (baseline wander).
+/// - banyak titik balik besar (>= 6) pada sinyal tanpa garis dasar lambat;
+///   "besar" = lebih dari 3x lantai noise (median |selisih antar-sampel|), atau
+/// - garis dasar lokal (median 0,3 s) menyimpang dari garis dasar 2 s
+///   lebih dari 36% tinggi QRS tipikal (baseline wander / elektroda bergeser).
 /// Bagian noise yang berjarak < 0,4 s digabung, lalu diberi jarak aman 0,15 s.
 List<Segmen> deteksiArtefak(List<double> x, double fs) {
   final n = x.length;
+  // garis dasar lambat: rata-rata bergerak 1 s (tengah)
+  final m1 = fs.round();
+  final pref = List<double>.filled(n + 1, 0);
+  for (var i = 0; i < n; i++) {
+    pref[i + 1] = pref[i] + x[i];
+  }
+  final y = List<double>.generate(n, (i) {
+    final a = max(0, i - m1 ~/ 2), z = min(n, i + m1 ~/ 2 + 1);
+    return x[i] - (pref[z] - pref[a]) / (z - a);
+  });
+  double persentil(List<double> v, double p) {
+    final u = [...v]..sort();
+    return u[(p * (u.length - 1)).round()];
+  }
+
+  final tinggi = persentil(y.map((v) => v.abs()).toList(), 0.99);
+  final dy = List<double>.generate(n - 1, (i) => y[i + 1] - y[i]);
+  final lantai = persentil(dy.map((v) => v.abs()).toList(), 0.5);
+  final ambang = max(3 * lantai, 0.02 * tinggi);
+  double median(int a, int z) => persentil(x.sublist(max(0, a), min(n, z)), 0.5);
+
   final w = (0.25 * fs).round(), hop = (0.1 * fs).round();
-  final glob = ([...x]..sort())[n ~/ 2];
-  final ambangLangkah = 0.08; // mV per sampel pada 250 Hz
   final tandai = List<bool>.filled(n, false);
   for (var a = 0; a + w <= n; a += hop) {
-    var balik = 0;
-    var arahLalu = 0;
-    for (var i = a + 1; i < a + w; i++) {
-      final dlt = x[i] - x[i - 1];
-      if (dlt.abs() < ambangLangkah * 250 / fs) continue;
-      final arah = dlt > 0 ? 1 : -1;
+    var balik = 0, arahLalu = 0;
+    for (var i = a; i < a + w - 1; i++) {
+      if (dy[i].abs() < ambang) continue;
+      final arah = dy[i] > 0 ? 1 : -1;
       if (arahLalu != 0 && arah != arahLalu) balik++;
       arahLalu = arah;
     }
-    final p = x.sublist(a, a + w)..sort();
-    final geser = (p[w ~/ 2] - glob).abs();
-    if (balik >= 8 || geser > 0.35) {
+    final p = a + w ~/ 2;
+    final simpang = (median(p - (0.15 * fs).round(), p + (0.15 * fs).round()) - median(p - fs.round(), p + fs.round())).abs() /
+        (tinggi + 1e-9);
+    if (balik >= 6 || simpang > 0.36) {
       for (var i = a; i < a + w; i++) {
         tandai[i] = true;
       }
