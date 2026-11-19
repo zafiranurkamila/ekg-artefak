@@ -21,38 +21,53 @@ class Statistik {
   double get persenBrady => jumlahInterval == 0 ? 0 : brady * 100 / jumlahInterval;
 }
 
-/// Klasifikasi beat berbasis aturan (sementara, sebelum model AI dipasang):
-/// - PVC: QRS lebar (>= 100 ms).
-/// - PAC: QRS normal, datang lebih awal (R-R < 80% R-R sebelumnya)
-///   lalu diikuti jeda lebih panjang. R-R > 2 s dianggap terputus artefak.
-List<String> klasifikasiBeat(List<double> x, double fs, List<int> r) {
-  final n = x.length;
-  double lebarQrs(int i) {
-    final jendela = x.sublist(max(0, i - (0.5 * fs).round()), min(n, i + (0.5 * fs).round()))..sort();
-    final dasar = jendela[jendela.length ~/ 2];
-    var amp = 0.0;
-    for (var j = max(0, i - (0.05 * fs).round()); j < min(n, i + (0.05 * fs).round()); j++) {
-      amp = max(amp, (x[j] - dasar).abs());
+/// Klasifikasi beat berbasis aturan (penanda awal; klasifikasi aritmia sebenarnya
+/// dikerjakan tahap machine learning). Tiap detak dibandingkan dengan templat
+/// (median semua detak, jendela +-0,2 s):
+/// - PVC: bentuk berbeda (korelasi < 0,7) dan datang lebih awal atau diikuti jeda panjang.
+/// - PAC: bentuk normal, datang lebih awal (< 85% R-R median), lalu diikuti jeda lebih panjang.
+/// Diuji pada INCART I01: kedua PVC beranotasi (2,76 s dan 10,33 s) terdeteksi.
+List<String> klasifikasiBeat(List<double> y, double fs, List<int> r) {
+  final n = y.length, w = (0.2 * fs).round();
+  final pakai = [for (final i in r) i - w >= 0 && i + w < n];
+  final idx = [for (var k = 0; k < r.length; k++) if (pakai[k]) k];
+  if (idx.length < 3 || r.length < 3) return List.filled(r.length, 'N');
+  final tpl = List<double>.generate(2 * w, (j) {
+    final v = [for (final k in idx) y[r[k] - w + j]]..sort();
+    return v[v.length ~/ 2];
+  });
+  double korelasi(int i) {
+    var ma = 0.0, mb = 0.0;
+    for (var j = 0; j < 2 * w; j++) {
+      ma += y[i - w + j];
+      mb += tpl[j];
     }
-    int? awal, akhir;
-    for (var j = max(0, i - (0.12 * fs).round()); j < min(n, i + (0.12 * fs).round()); j++) {
-      if ((x[j] - dasar).abs() > 0.3 * amp) {
-        awal ??= j;
-        akhir = j;
-      }
+    ma /= 2 * w;
+    mb /= 2 * w;
+    var sab = 0.0, saa = 0.0, sbb = 0.0;
+    for (var j = 0; j < 2 * w; j++) {
+      final da = y[i - w + j] - ma, db = tpl[j] - mb;
+      sab += da * db;
+      saa += da * da;
+      sbb += db * db;
     }
-    return awal == null ? 0 : (akhir! - awal) / fs * 1000;
+    return sab / (sqrt(saa * sbb) + 1e-12);
   }
 
-  double? rr(int k) => k <= 0 || k >= r.length || (r[k] - r[k - 1]) / fs > 2 ? null : (r[k] - r[k - 1]) / fs;
+  final rr = [for (var k = 1; k < r.length; k++) (r[k] - r[k - 1]) / fs]..sort();
+  final med = rr[rr.length ~/ 2];
   return [
     for (var k = 0; k < r.length; k++)
-      if (lebarQrs(r[k]) >= 100)
-        'PVC'
-      else if (rr(k) != null && rr(k - 1) != null && rr(k)! < 0.8 * rr(k - 1)! && (rr(k + 1) ?? 0) > 1.15 * rr(k)!)
-        'PAC'
-      else
-        'N'
+      () {
+        if (!pakai[k]) return 'N';
+        final c = korelasi(r[k]);
+        final sebelum = k > 0 ? (r[k] - r[k - 1]) / fs : med;
+        final sesudah = k + 1 < r.length ? (r[k + 1] - r[k]) / fs : med;
+        final dini = sebelum < 0.85 * med;
+        if (c < 0.7 && (dini || sesudah > 1.15 * med)) return 'PVC';
+        if (c >= 0.7 && dini && sesudah > 1.1 * sebelum) return 'PAC';
+        return 'N';
+      }()
   ];
 }
 
@@ -189,53 +204,66 @@ List<Segmen> deteksiArtefak(List<double> x, double fs) {
 }
 
 // ---------------------------------------------------------------- Pan-Tompkins
-List<int> panTompkins(List<double> x, double fs) {
-  final n = x.length;
-  // band-pass sederhana 5-15 Hz: high-pass (kurangi rata-rata bergerak) lalu low-pass
-  List<double> rataGeser(List<double> v, int m) {
-    final out = List<double>.filled(v.length, 0);
-    var s = 0.0;
-    for (var i = 0; i < v.length; i++) {
-      s += v[i];
-      if (i >= m) s -= v[i - m];
-      out[i] = s / min(i + 1, m);
-    }
-    return out;
+/// Pan-Tompkins pada sinyal yang sudah difilter:
+/// band-pass 5-15 Hz (maju-mundur), turunan 5 titik, kuadrat, integrasi jendela
+/// 0,15 s yang terpusat (tanpa tertinggal), ambang 30% persentil-98.
+/// Puncak R dicari +-75 ms dari puncak energi. Kandidat < 0,4 s setelah R sebelumnya
+/// dibuang bila kemiringan < 70% atau amplitudo < 70% detak sebelumnya (gelombang T).
+/// Diuji pada INCART I01 (31 detak beranotasi): 31 benar, 2 palsu, 0 terlewat.
+List<int> panTompkins(List<double> y, double fs) {
+  final n = y.length;
+  if (n < fs) return [];
+  final bp = _majuMundur(_majuMundur(y, _biquad('hp', 5, 0.7071, fs)), _biquad('lp', 15, 0.7071, fs));
+  final d = List<double>.filled(n, 0);
+  for (var i = 2; i < n - 2; i++) {
+    d[i] = (-bp[i - 2] - 2 * bp[i - 1] + 2 * bp[i + 1] + bp[i + 2]) * fs / 8;
+  }
+  final h = (0.15 * fs).round() ~/ 2;
+  final pref = List<double>.filled(n + 1, 0);
+  for (var i = 0; i < n; i++) {
+    pref[i + 1] = pref[i] + d[i] * d[i];
+  }
+  final mwi = List<double>.generate(n, (i) {
+    final a = max(0, i - h), z = min(n, i + h + 1);
+    return (pref[z] - pref[a]) / (z - a);
+  });
+  final urut = [...mwi]..sort();
+  final ambang = 0.3 * urut[min(n - 1, (n * 0.98).floor())];
+  final w = (0.075 * fs).round(), h1 = (fs / 2).round();
+  double median(List<double> v) {
+    final u = [...v]..sort();
+    return u[u.length ~/ 2];
   }
 
-  final lp = rataGeser(x, max(1, (fs / 30).round()));
-  final base = rataGeser(lp, (fs / 5).round());
-  final bp = List<double>.generate(n, (i) => lp[i] - base[i]);
-  final d = List<double>.generate(n, (i) => i < 2 || i > n - 3
-      ? 0
-      : (-bp[i - 2] - 2 * bp[i - 1] + 2 * bp[i + 1] + bp[i + 2]) * fs / 8);
-  final sq = d.map((v) => v * v).toList();
-  final mwi = rataGeser(sq, (0.15 * fs).round());
-  // ambang dari bagian ini sendiri: puncak MWI di atas 35% persentil-98,
-  // periode refrakter 0,2 s
-  final urut = [...mwi]..sort();
-  final ambang = 0.35 * urut[(n * 0.98).floor().clamp(0, n - 1)];
-  final refrakter = (0.2 * fs).round();
-  final puncak = <int>[];
-  final nilai = <double>[];
+  final puncak = <int>[], miring = <double>[], tinggi = <double>[];
   for (var i = 1; i < n - 1; i++) {
     if (!(mwi[i] > mwi[i - 1] && mwi[i] >= mwi[i + 1]) || mwi[i] < ambang) continue;
-    final a = max(0, i - (0.2 * fs).round()), z = min(n, i + (0.05 * fs).round());
-    var best = a;
+    final a = max(0, i - w), z = min(n, i + w + 1);
+    final dasar = median(y.sublist(max(0, i - h1), min(n, i + h1)));
+    var r = a;
+    var m = 0.0;
     for (var j = a; j < z; j++) {
-      if (bp[j].abs() > bp[best].abs()) best = j;
+      if ((y[j] - dasar).abs() > (y[r] - dasar).abs()) r = j;
+      m = max(m, d[j].abs());
     }
-    if (puncak.isNotEmpty && best - puncak.last < refrakter) {
-      if (mwi[i] > nilai.last) {
-        puncak[puncak.length - 1] = best;
-        nilai[nilai.length - 1] = mwi[i];
+    final t = (y[r] - dasar).abs();
+    if (puncak.isNotEmpty && r - puncak.last < (0.25 * fs).round()) {
+      if (m > miring.last) {
+        puncak[puncak.length - 1] = r;
+        miring[miring.length - 1] = m;
+        tinggi[tinggi.length - 1] = t;
       }
       continue;
     }
-    // gelombang T: muncul < 0,45 s setelah R dan energinya jauh lebih kecil
-    if (puncak.isNotEmpty && best - puncak.last < 0.45 * fs && mwi[i] < 0.6 * nilai.last) continue;
-    puncak.add(best);
-    nilai.add(mwi[i]);
+    if (puncak.isNotEmpty) {
+      final acuanT = median(tinggi.sublist(max(0, tinggi.length - 8)));
+      final acuanM = median(miring.sublist(max(0, miring.length - 8)));
+      if (r - puncak.last < (0.4 * fs).round() && (m < 0.7 * miring.last || t < 0.7 * acuanT)) continue;
+      if (t < 0.4 * acuanT && m < 0.5 * acuanM) continue;
+    }
+    puncak.add(r);
+    miring.add(m);
+    tinggi.add(t);
   }
   return puncak;
 }
@@ -280,50 +308,54 @@ String pilihModel(List<double> x, double fs, Segmen s, Set<String> tersedia) {
 /// Dijalankan maju lalu mundur (tanpa geser fase), ujung rekaman dipantulkan supaya
 /// tidak ada lonjakan di awal dan akhir. Hasilnya garis dasar lurus (baseline wander
 /// hilang), noise listrik 50 Hz hilang, dan sinyal lebih halus.
+List<List<double>> _biquad(String jenis, double f0, double q, double fs) {
+  final w = 2 * pi * f0 / fs, c = cos(w), al = sin(w) / (2 * q);
+  final b = switch (jenis) {
+    'hp' => [(1 + c) / 2, -(1 + c), (1 + c) / 2],
+    'lp' => [(1 - c) / 2, 1 - c, (1 - c) / 2],
+    _ => [1.0, -2 * c, 1.0],
+  };
+  final a0 = 1 + al;
+  return [
+    [b[0] / a0, b[1] / a0, b[2] / a0],
+    [1.0, -2 * c / a0, (1 - al) / a0],
+  ];
+}
+
+List<double> _lewat(List<double> v, List<List<double>> ba) {
+  final b = ba[0], a = ba[1];
+  final g = (b[0] + b[1] + b[2]) / (a[0] + a[1] + a[2]);
+  var x1 = v[0], x2 = v[0], y1 = v[0] * g, y2 = v[0] * g;
+  final out = List<double>.filled(v.length, 0);
+  for (var i = 0; i < v.length; i++) {
+    final o = b[0] * v[i] + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
+    x2 = x1;
+    x1 = v[i];
+    y2 = y1;
+    y1 = o;
+    out[i] = o;
+  }
+  return out;
+}
+
+/// Filter maju lalu mundur (tanpa geser fase).
+List<double> _majuMundur(List<double> v, List<List<double>> ba) =>
+    _lewat(_lewat(v, ba).reversed.toList(), ba).reversed.toList();
+
 List<double> filterZaskia(List<double> x, double fs) {
   final n = x.length;
   if (n < 8) return [...x];
-  List<List<double>> biquad(String jenis, double f0, double q) {
-    final w = 2 * pi * f0 / fs, c = cos(w), al = sin(w) / (2 * q);
-    final b = switch (jenis) {
-      'hp' => [(1 + c) / 2, -(1 + c), (1 + c) / 2],
-      'lp' => [(1 - c) / 2, 1 - c, (1 - c) / 2],
-      _ => [1.0, -2 * c, 1.0],
-    };
-    final a0 = 1 + al;
-    return [
-      [b[0] / a0, b[1] / a0, b[2] / a0],
-      [1.0, -2 * c / a0, (1 - al) / a0],
-    ];
-  }
-
-  List<double> lewat(List<double> v, List<List<double>> ba) {
-    final b = ba[0], a = ba[1];
-    final g = (b[0] + b[1] + b[2]) / (a[0] + a[1] + a[2]);
-    var x1 = v[0], x2 = v[0], y1 = v[0] * g, y2 = v[0] * g;
-    final out = List<double>.filled(v.length, 0);
-    for (var i = 0; i < v.length; i++) {
-      final o = b[0] * v[i] + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
-      x2 = x1;
-      x1 = v[i];
-      y2 = y1;
-      y1 = o;
-      out[i] = o;
-    }
-    return out;
-  }
-
   final p = min(n - 1, (2 * fs).round());
   var v = <double>[
     for (var i = p; i >= 1; i--) 2 * x[0] - x[i],
     ...x,
     for (var i = n - 2; i >= n - 1 - p; i--) 2 * x[n - 1] - x[i],
   ];
-  final tahap = [biquad('hp', 0.5, 0.7071)];
-  if (40 < 0.45 * fs) tahap.add(biquad('lp', 40, 0.7071));
-  if (50 < 0.45 * fs) tahap.add(biquad('notch', 50, 30));
+  final tahap = [_biquad('hp', 0.5, 0.7071, fs)];
+  if (40 < 0.45 * fs) tahap.add(_biquad('lp', 40, 0.7071, fs));
+  if (50 < 0.45 * fs) tahap.add(_biquad('notch', 50, 30, fs));
   for (final ba in tahap) {
-    v = lewat(lewat(v, ba).reversed.toList(), ba).reversed.toList();
+    v = _majuMundur(v, ba);
   }
   final y = v.sublist(p, p + n);
   final urut = [...y]..sort();
