@@ -450,7 +450,11 @@ class HasilAnalisis {
   const HasilAnalisis(this.sinyal, this.sinyalAsli, this.fs, this.artefak, this.tingkat, this.penanganan, this.dibuang,
       this.puncakR, this.stat, this.jenisBeat, this.bahaya);
   bool get dibersihkan => penanganan.any((p) => p.startsWith('Direkonstruksi'));
-  int hitung(String j) => jenisBeat.where((e) => e == j).length;
+  /// Jumlah detak berjenis [j], tanpa detak di dalam segmen artefak.
+  int hitung(String j) => [
+        for (var k = 0; k < puncakR.length; k++)
+          if (jenisBeat[k] == j && !artefak.any((s) => s.memuat(puncakR[k] / fs))) k
+      ].length;
 }
 
 /// Alur lengkap:
