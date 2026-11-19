@@ -1,0 +1,5 @@
+fs = 257 Hz, durasi 20 detik, lead II, SNR 0 dB
+posisi noise sebenarnya:
+3.00 - 6.00 s: MA
+12.50 - 15.00 s: MA
+PVC menurut anotasi INCART (detik): [2.76, 10.33]

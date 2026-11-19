@@ -1,5 +1,7 @@
 import 'dart:math';
 import 'dart:convert';
+// ignore: avoid_web_libraries_in_flutter, deprecated_member_use
+import 'dart:html' as html;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -61,7 +63,35 @@ class _LayarState extends State<Layar> {
     if (mounted) setState(() {});
   }
 
-  void _hitung() => _h = _pakaiModel && _model.isNotEmpty ? analisisDenganModel(_x, _fs, _model) : analisis(_x, _fs);
+  void _hitung() => _h = analisis(_x, _fs, model: _pakaiModel ? _model : const {});
+
+  /// Rekaman panjang dipotong 60 detik pertama supaya tetap ringan di HP.
+  (List<double>, String) _potong(List<double> x, double fs) {
+    final maks = (60 * fs).round();
+    return x.length > maks ? (x.sublist(0, maks), ', 60 detik pertama') : (x, '');
+  }
+
+  void _pasang(List<double> x, double fs, String nama, [String tambahan = '']) {
+    final (y, potong) = _potong(x, fs);
+    setState(() {
+      _x = y;
+      _fs = fs;
+      _hitung();
+      _nama = nama;
+      _info = '${(y.length / fs).toStringAsFixed(0)} detik, ${fs.round()} Hz$tambahan$potong';
+    });
+  }
+
+  /// Unduh sinyal hasil filter dan rekonstruksi (float32) untuk tahap machine learning.
+  void _unduh() {
+    final bytes = keBinFloat32(_h.sinyal);
+    final url = html.Url.createObjectUrlFromBlob(html.Blob([bytes], 'application/octet-stream'));
+    final nama = '${_nama.split('.').first.replaceAll(' ', '_')}_bersih_${_fs.round()}Hz.bin';
+    html.AnchorElement(href: url)
+      ..download = nama
+      ..click();
+    html.Url.revokeObjectUrl(url);
+  }
 
   static const _pilihanContoh = [
     ('Sinyal buatan', 'Noise gerak, otot, dan baseline', ''),
@@ -69,6 +99,8 @@ class _LayarState extends State<Layar> {
     ('INCART + noise elektroda (EM)', 'Noise di 3 sampai 6 s dan 12,5 sampai 15 s', 'incart_I01_em'),
     ('INCART + noise otot (MA)', 'Noise di 3 sampai 6 s dan 12,5 sampai 15 s', 'incart_I01_ma'),
     ('INCART + baseline wander (BW)', 'Noise di 3 sampai 6 s dan 12,5 sampai 15 s', 'incart_I01_bw'),
+    ('INCART + noise campuran', 'BW+EM di 3 sampai 6 s, MA+EM di 12,5 sampai 15 s', 'incart_I01_campur'),
+    ('INCART + noise berat (-6 dB)', 'MA dan EM jauh lebih kuat dari sinyal', 'incart_I01_berat'),
   ];
 
   Future<void> _contoh() async {
@@ -115,47 +147,45 @@ class _LayarState extends State<Layar> {
     );
     if (pilih == null) return;
     final (judul, _, file) = _pilihanContoh[pilih];
-    List<double> x;
-    double fs;
     if (file.isEmpty) {
-      x = sinyalContoh();
-      fs = 250;
+      _pasang(sinyalContoh(), 250, judul);
     } else {
-      x = bacaCsv(await rootBundle.loadString('contoh_csv/$file.csv'));
-      fs = 257;
+      final bd = await rootBundle.load('contoh/$file.bin');
+      _pasang(bacaBinFloat32(bd.buffer.asUint8List(bd.offsetInBytes, bd.lengthInBytes)), 257, judul);
     }
-    setState(() {
-      _x = x;
-      _fs = fs;
-      _hitung();
-      _nama = judul;
-      _info = '${(x.length / fs).toStringAsFixed(0)} detik, ${fs.round()} Hz';
-    });
   }
 
+  /// Muat rekaman: .bin (float32 mentah), pasangan .hea + .dat (PhysioNet), atau CSV.
   Future<void> _muat() async {
-    final fs = await _tanyaFs();
-    if (fs == null) return;
     try {
-      final pilih = await FilePicker.platform
-          .pickFiles(type: FileType.custom, allowedExtensions: ['csv', 'txt'], withData: true);
-      final f = pilih?.files.single;
-      if (f == null || f.bytes == null) return;
-      final x = bacaCsv(utf8.decode(f.bytes!, allowMalformed: true));
+      final pilih = await FilePicker.platform.pickFiles(
+          type: FileType.custom, allowedExtensions: ['bin', 'hea', 'dat', 'csv', 'txt'], withData: true, allowMultiple: true);
+      final files = pilih?.files.where((f) => f.bytes != null).toList() ?? [];
+      if (files.isEmpty) return;
+      String ext(PlatformFile f) => f.name.split('.').last.toLowerCase();
+      final hea = files.where((f) => ext(f) == 'hea').firstOrNull;
+      if (hea != null) {
+        final dat = files.where((f) => ext(f) == 'dat').firstOrNull;
+        if (dat == null) throw 'pilih file .hea dan .dat sekaligus';
+        final (x, fs, lead) = bacaPhysionet(utf8.decode(hea.bytes!, allowMalformed: true), dat.bytes!);
+        if (x.length < fs * 2) throw 'data terlalu pendek';
+        _pasang(x, fs, hea.name.split('.').first, ', lead $lead');
+        return;
+      }
+      final f = files.first;
+      final fs = await _tanyaFs(f.name);
+      if (fs == null) return;
+      final x = ext(f) == 'bin' || ext(f) == 'dat'
+          ? bacaBinFloat32(f.bytes!)
+          : bacaCsv(utf8.decode(f.bytes!, allowMalformed: true));
       if (x.length < fs * 2) throw 'data terlalu pendek';
-      setState(() {
-        _fs = fs;
-        _x = x;
-        _hitung();
-        _nama = f.name;
-        _info = '${(x.length / fs).toStringAsFixed(1)} detik, ${fs.round()} Hz';
-      });
+      _pasang(x, fs, f.name);
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Gagal memuat: $e')));
     }
   }
 
-  Future<double?> _tanyaFs() {
+  Future<double?> _tanyaFs(String namaFile) {
     final c = TextEditingController(text: _fs.round().toString());
     return showModalBottomSheet<double>(
       context: context,
@@ -167,8 +197,8 @@ class _LayarState extends State<Layar> {
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('Muat Rekaman', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: tinta)),
           const SizedBox(height: 4),
-          const Text('File CSV berisi 1 kolom amplitudo (mV), atau waktu,amplitudo.',
-              style: TextStyle(color: redup, fontSize: 13)),
+          Text('$namaFile. File .bin dibaca sebagai float32 mentah satu lead (mV). Untuk format PhysioNet, pilih file .hea dan .dat sekaligus.',
+              style: const TextStyle(color: redup, fontSize: 13)),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -183,7 +213,7 @@ class _LayarState extends State<Layar> {
           SizedBox(
             width: double.infinity,
             child: _TombolPil(
-                teks: 'Pilih File CSV',
+                teks: 'Lanjut',
                 ikon: Icons.upload_file_rounded,
                 onTap: () => Navigator.pop(ctx, double.tryParse(c.text.replaceAll(',', '.')))),
           ),
@@ -209,7 +239,7 @@ class _LayarState extends State<Layar> {
   Widget _beranda() {
     final s = _h.stat;
     final durasi = _h.sinyal.length / _h.fs;
-    final durArt = _h.artefak.fold(0.0, (a, g) => a + g.selesai - g.mulai);
+    final durArt = _h.dibuang.fold(0.0, (a, g) => a + g.selesai - g.mulai);
     final persenBersih = durasi == 0 ? 0.0 : (1 - durArt / durasi).clamp(0.0, 1.0);
     String statusHr(double v) => v == 0 ? '-' : (v < 60 ? 'Rendah' : (v > 100 ? 'Tinggi' : 'Normal'));
     String ada(int n) => n == 0 ? 'Normal' : 'Perlu perhatian';
@@ -220,7 +250,7 @@ class _LayarState extends State<Layar> {
     for (var t = 0.0; t < durasi - 1e-9; t += blok) {
       final z = min(durasi, t + blok);
       var kotor = 0.0;
-      for (final a in _h.artefak) {
+      for (final a in _h.dibuang) {
         kotor += max(0.0, min(z, a.selesai) - max(t, a.mulai));
       }
       batang.add(1 - kotor / (z - t));
@@ -276,6 +306,26 @@ class _LayarState extends State<Layar> {
         const SizedBox(width: 10),
         _Kotak(warna: const Color(0xFFEFF6F1), judul: 'PAC', nilai: '${_h.hitung('PAC')}', satuan: 'beat'),
       ]),
+      if (_h.bahaya.isNotEmpty) ...[
+        const SizedBox(height: 14),
+        Container(
+          padding: const EdgeInsets.fromLTRB(18, 14, 18, 14),
+          decoration: BoxDecoration(color: const Color(0xFFFDECEC), borderRadius: BorderRadius.circular(22)),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFC62828)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Perlu diperiksa segera', style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFFC62828))),
+                const SizedBox(height: 4),
+                for (final b in _h.bahaya) Text(b, style: const TextStyle(color: tinta, fontSize: 13, height: 1.4)),
+                const SizedBox(height: 4),
+                const Text('Penanda awal berbasis aturan, bukan diagnosis.', style: TextStyle(color: redup, fontSize: 11.5)),
+              ]),
+            ),
+          ]),
+        ),
+      ],
       const SizedBox(height: 22),
 
       // grafik
@@ -299,12 +349,14 @@ class _LayarState extends State<Layar> {
         child: Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('Bersihkan dengan model CDAE', style: TextStyle(fontWeight: FontWeight.w700, color: hijauGelap)),
+              const Text('Rekonstruksi artefak ringan', style: TextStyle(fontWeight: FontWeight.w700, color: hijauGelap)),
               const SizedBox(height: 2),
               Text(
                   _model.isEmpty
                       ? 'Memuat model...'
-                      : (_pakaiModel ? 'Artefak dibersihkan lalu ikut dihitung' : 'Artefak dibuang dari perhitungan'),
+                      : (_pakaiModel
+                          ? 'Ringan direkonstruksi decoder CDAE, parah dibuang'
+                          : 'Semua artefak yang tersisa setelah filter dibuang'),
                   style: const TextStyle(color: redup, fontSize: 12)),
             ]),
           ),
@@ -319,6 +371,28 @@ class _LayarState extends State<Layar> {
                     }),
           ),
         ]),
+      ),
+      const SizedBox(height: 12),
+      Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(28),
+          onTap: _unduh,
+          child: const Padding(
+            padding: EdgeInsets.fromLTRB(20, 14, 16, 14),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Unduh sinyal bersih (.bin)', style: TextStyle(fontWeight: FontWeight.w700, color: hijauGelap)),
+                  SizedBox(height: 2),
+                  Text('Float32, untuk tahap klasifikasi aritmia', style: TextStyle(color: redup, fontSize: 12)),
+                ]),
+              ),
+              Icon(Icons.download_rounded, color: zaitun),
+            ]),
+          ),
+        ),
       ),
       const SizedBox(height: 26),
 
@@ -343,11 +417,16 @@ class _LayarState extends State<Layar> {
       if (_h.artefak.isEmpty) const _Baris('Tidak ada artefak', 'Seluruh rekaman dihitung', '-'),
       for (final (i, a) in _h.artefak.indexed)
         _Baris(
-          'Segmen ${i + 1}',
+          'Segmen ${i + 1}, ${const {'lurus': 'diluruskan', 'ringan': 'ringan', 'parah': 'parah'}[_h.tingkat[i]]}',
           '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik',
-          _h.dibersihkan ? 'Dibersihkan ${(_h.modelPerSegmen[i] ?? '').toUpperCase()}' : 'Dibuang',
+          _h.penanganan[i],
           netral: true,
         ),
+      const Padding(
+        padding: EdgeInsets.fromLTRB(6, 2, 6, 0),
+        child: Text('Sinyal sudah difilter (0,5-40 Hz dan 50 Hz) sehingga garis dasar lurus. Jenis noise akan ditentukan model dari Zaskia.',
+            style: TextStyle(color: redup, fontSize: 11.5)),
+      ),
     ]);
   }
 }
@@ -550,8 +629,10 @@ class Grafik extends CustomPainter {
 
     // latar: bersih hijau, artefak merah
     c.drawRect(Rect.fromLTWH(kiri, atas, w, ht), Paint()..color = hijauArea);
-    for (final s in h.artefak) {
-      c.drawRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht), Paint()..color = merahArea);
+    for (final (k, s) in h.artefak.indexed) {
+      final dibuang = h.penanganan[k] == 'Dibuang';
+      c.drawRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht),
+          Paint()..color = dibuang ? merahArea : const Color(0xFFFBE7E7));
     }
     // garis putus-putus tiap 2 detik (seperti referensi)
     final putus = Paint()
@@ -564,9 +645,10 @@ class Grafik extends CustomPainter {
       }
     }
     // label ARTEFAK di kotak putih
-    for (final s in h.artefak) {
-      if (px(s.selesai) - px(s.mulai) > 34) {
-        _label(c, 'ARTEFAK', Offset((px(s.mulai) + px(s.selesai)) / 2, atas + ht * 0.1), kecil ? 6.5 : 9);
+    for (final (k, s) in h.artefak.indexed) {
+      final teks = h.penanganan[k] == 'Dibuang' ? 'ARTEFAK' : (h.tingkat[k] == 'lurus' ? 'LURUS' : 'REKONSTRUKSI');
+      if (px(s.selesai) - px(s.mulai) > (teks.length > 7 ? 60 : 34)) {
+        _label(c, teks, Offset((px(s.mulai) + px(s.selesai)) / 2, atas + ht * 0.1), kecil ? 6.5 : 9);
       }
     }
 
@@ -594,11 +676,20 @@ class Grafik extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.8;
     if (h.dibersihkan) {
-      c.drawPath(jalur(h.sinyalAsli!), gaya..color = const Color(0x55000000));
+      final urut = [...h.sinyalAsli]..sort();
+      final tengah = urut[urut.length ~/ 2];
+      c.save();
+      final dalamAsli = Path();
+      for (final (k, s) in h.artefak.indexed) {
+        if (h.penanganan[k].startsWith('Direkonstruksi')) dalamAsli.addRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht));
+      }
+      c.clipPath(dalamAsli);
+      c.drawPath(jalur([for (final v in h.sinyalAsli) v - tengah]), gaya..color = const Color(0x55000000));
+      c.restore();
       c.save();
       final luar = Path()..addRect(Rect.fromLTWH(kiri, atas, w, ht));
-      for (final s in h.artefak) {
-        luar.addRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht));
+      for (final (k, s) in h.artefak.indexed) {
+        if (h.penanganan[k].startsWith('Direkonstruksi')) luar.addRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht));
       }
       luar.fillType = PathFillType.evenOdd;
       c.clipPath(luar);
@@ -606,8 +697,8 @@ class Grafik extends CustomPainter {
       c.restore();
       c.save();
       final dalam = Path();
-      for (final s in h.artefak) {
-        dalam.addRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht));
+      for (final (k, s) in h.artefak.indexed) {
+        if (h.penanganan[k].startsWith('Direkonstruksi')) dalam.addRect(Rect.fromLTRB(px(s.mulai), atas, px(s.selesai), atas + ht));
       }
       c.clipPath(dalam);
       c.drawPath(jalur(h.sinyal), Paint()

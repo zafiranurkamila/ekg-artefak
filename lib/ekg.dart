@@ -1,6 +1,7 @@
 // Logika EKG murni (tanpa Flutter): sinyal contoh, deteksi artefak,
 // Pan-Tompkins, dan statistik detak jantung yang mengabaikan bagian artefak.
 import 'dart:math';
+import 'dart:typed_data';
 import 'cdae.dart';
 
 class Segmen {
@@ -18,21 +19,6 @@ class Statistik {
       this.brady, this.jumlahInterval);
   double get persenTachy => jumlahInterval == 0 ? 0 : tachy * 100 / jumlahInterval;
   double get persenBrady => jumlahInterval == 0 ? 0 : brady * 100 / jumlahInterval;
-}
-
-class HasilAnalisis {
-  final List<double> sinyal;
-  final double fs;
-  final List<Segmen> artefak;
-  final List<int> puncakR; // indeks sampel, hanya di bagian bersih
-  final Statistik stat;
-  final List<String> jenisBeat; // 'N', 'PVC', atau 'PAC' untuk tiap puncak R
-  final List<double>? sinyalAsli; // terisi bila artefak sudah dibersihkan model
-  final Map<int, String> modelPerSegmen; // indeks segmen -> 'bw' / 'em'
-  const HasilAnalisis(this.sinyal, this.fs, this.artefak, this.puncakR, this.stat, this.jenisBeat,
-      {this.sinyalAsli, this.modelPerSegmen = const {}});
-  bool get dibersihkan => sinyalAsli != null;
-  int hitung(String j) => jenisBeat.where((e) => e == j).length;
 }
 
 /// Klasifikasi beat berbasis aturan (sementara, sebelum model AI dipasang):
@@ -133,7 +119,7 @@ List<double> sinyalContoh({double fs = 250, double durasi = 20, int seed = 7}) {
 /// - banyak titik balik besar (>= 6) pada sinyal tanpa garis dasar lambat;
 ///   "besar" = lebih dari 3x lantai noise (median |selisih antar-sampel|), atau
 /// - garis dasar lokal (median 0,3 s) menyimpang dari garis dasar 2 s
-///   lebih dari 36% tinggi QRS tipikal (baseline wander / elektroda bergeser).
+///   lebih dari 25% tinggi QRS tipikal (baseline wander / elektroda bergeser).
 /// Bagian noise yang berjarak < 0,4 s digabung, lalu diberi jarak aman 0,15 s.
 List<Segmen> deteksiArtefak(List<double> x, double fs) {
   final n = x.length;
@@ -171,7 +157,7 @@ List<Segmen> deteksiArtefak(List<double> x, double fs) {
     final p = a + w ~/ 2;
     final simpang = (median(p - (0.15 * fs).round(), p + (0.15 * fs).round()) - median(p - fs.round(), p + fs.round())).abs() /
         (tinggi + 1e-9);
-    if (balik >= 6 || simpang > 0.36) {
+    if (balik >= 6 || simpang > 0.25) {
       for (var i = a; i < a + w; i++) {
         tandai[i] = true;
       }
@@ -274,37 +260,6 @@ Statistik hitungStatistik(List<int> r, double fs, List<Segmen> artefak) {
   );
 }
 
-HasilAnalisis analisis(List<double> x, double fs) {
-  final art = deteksiArtefak(x, fs);
-  // Pan-Tompkins dijalankan terpisah di tiap bagian bersih (>= 1,5 s)
-  final r = <int>[];
-  var awal = 0.0;
-  final batas = [...art, Segmen(x.length / fs, x.length / fs)];
-  for (final sg in batas) {
-    final m = (awal * fs).round(), z = (sg.mulai * fs).round();
-    if (z - m >= 1.5 * fs) {
-      for (final i in panTompkins(x.sublist(m, z), fs)) {
-        final t = (m + i) / fs;
-        if (t > awal + 0.2 || awal == 0) r.add(m + i); // lewati 0,2 s pertama setelah artefak
-      }
-    }
-    awal = sg.selesai;
-  }
-  return HasilAnalisis(x, fs, art, r, hitungStatistik(r, fs, art), klasifikasiBeat(x, fs, r));
-}
-
-/// Baca CSV satu kolom (amplitudo) atau dua kolom (waktu, amplitudo).
-List<double> bacaCsv(String isi) {
-  final out = <double>[];
-  for (final baris in isi.split(RegExp(r'\r?\n'))) {
-    final kol = baris.split(RegExp(r'[,;\t ]+')).where((s) => s.isNotEmpty).toList();
-    if (kol.isEmpty) continue;
-    final v = double.tryParse(kol.last);
-    if (v != null) out.add(v);
-  }
-  return out;
-}
-
 /// Jenis model untuk satu segmen: 'bw' (baseline wander, perubahan lambat)
 /// atau 'em' (elektroda/gerak, perubahan cepat). Model 'ma' menyusul.
 String pilihModel(List<double> x, double fs, Segmen s, Set<String> tersedia) {
@@ -320,47 +275,308 @@ String pilihModel(List<double> x, double fs, Segmen s, Set<String> tersedia) {
   return tersedia.first;
 }
 
-/// Bersihkan segmen artefak dengan model CDAE, lalu analisis ulang seluruh rekaman
-/// (bagian yang sudah dibersihkan ikut dihitung).
-HasilAnalisis analisisDenganModel(List<double> x, double fs, Map<String, Cdae> model) {
+// ---------------------------------------------------------------- filter Zaskia
+/// Filter yang sama dengan prapemrosesan Zaskia: band-pass 0,5-40 Hz dan notch 50 Hz.
+/// Dijalankan maju lalu mundur (tanpa geser fase), ujung rekaman dipantulkan supaya
+/// tidak ada lonjakan di awal dan akhir. Hasilnya garis dasar lurus (baseline wander
+/// hilang), noise listrik 50 Hz hilang, dan sinyal lebih halus.
+List<double> filterZaskia(List<double> x, double fs) {
+  final n = x.length;
+  if (n < 8) return [...x];
+  List<List<double>> biquad(String jenis, double f0, double q) {
+    final w = 2 * pi * f0 / fs, c = cos(w), al = sin(w) / (2 * q);
+    final b = switch (jenis) {
+      'hp' => [(1 + c) / 2, -(1 + c), (1 + c) / 2],
+      'lp' => [(1 - c) / 2, 1 - c, (1 - c) / 2],
+      _ => [1.0, -2 * c, 1.0],
+    };
+    final a0 = 1 + al;
+    return [
+      [b[0] / a0, b[1] / a0, b[2] / a0],
+      [1.0, -2 * c / a0, (1 - al) / a0],
+    ];
+  }
+
+  List<double> lewat(List<double> v, List<List<double>> ba) {
+    final b = ba[0], a = ba[1];
+    final g = (b[0] + b[1] + b[2]) / (a[0] + a[1] + a[2]);
+    var x1 = v[0], x2 = v[0], y1 = v[0] * g, y2 = v[0] * g;
+    final out = List<double>.filled(v.length, 0);
+    for (var i = 0; i < v.length; i++) {
+      final o = b[0] * v[i] + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
+      x2 = x1;
+      x1 = v[i];
+      y2 = y1;
+      y1 = o;
+      out[i] = o;
+    }
+    return out;
+  }
+
+  final p = min(n - 1, (2 * fs).round());
+  var v = <double>[
+    for (var i = p; i >= 1; i--) 2 * x[0] - x[i],
+    ...x,
+    for (var i = n - 2; i >= n - 1 - p; i--) 2 * x[n - 1] - x[i],
+  ];
+  final tahap = [biquad('hp', 0.5, 0.7071)];
+  if (40 < 0.45 * fs) tahap.add(biquad('lp', 40, 0.7071));
+  if (50 < 0.45 * fs) tahap.add(biquad('notch', 50, 30));
+  for (final ba in tahap) {
+    v = lewat(lewat(v, ba).reversed.toList(), ba).reversed.toList();
+  }
+  final y = v.sublist(p, p + n);
+  final urut = [...y]..sort();
+  final tengah = urut[n ~/ 2];
+  return [for (final e in y) e - tengah];
+}
+
+// ---------------------------------------------------------------- keparahan
+/// Tingkat tiap segmen artefak, diukur pada sinyal yang sudah difilter:
+/// rasio puncak (persentil 99 |y|) segmen terhadap bagian bersih rekaman.
+/// - 'lurus'  (< 1,0): sudah diluruskan filter (biasanya baseline wander), tetap dihitung
+/// - 'ringan' (1,0-1,4): direkonstruksi decoder CDAE bila model aktif, selain itu dibuang
+/// - 'parah'  (>= 1,4): dibuang
+/// Ambang diuji pada INCART + noise NSTDB 0 dB (ringan) dan -6 dB (parah).
+List<String> tingkatArtefak(List<double> y, double fs, List<Segmen> art) {
+  if (art.isEmpty) return const [];
+  double p99(Iterable<double> v) {
+    final u = v.map((e) => e.abs()).toList()..sort();
+    return u.isEmpty ? 0 : u[(0.99 * (u.length - 1)).round()];
+  }
+
+  final bersih = <double>[];
+  for (var i = 0; i < y.length; i++) {
+    if (!art.any((s) => s.memuat(i / fs))) bersih.add(y[i]);
+  }
+  final acuan = bersih.length > fs ? p99(bersih) : p99(y);
+  return [
+    for (final s in art)
+      () {
+        final a = (s.mulai * fs).round(), z = min(y.length, (s.selesai * fs).round());
+        final r = p99(y.sublist(a, max(a + 1, z))) / (acuan + 1e-9);
+        return r < 1.0 ? 'lurus' : (r < 1.4 ? 'ringan' : 'parah');
+      }()
+  ];
+}
+
+// ---------------------------------------------------------------- aritmia berbahaya
+/// Peringatan berbasis aturan dari detak yang terdeteksi. Klasifikasi aritmia yang
+/// sebenarnya dikerjakan tahap machine learning; ini hanya penanda awal.
+List<String> aritmiaBerbahaya(List<int> r, List<String> jenis, double fs, List<Segmen> dibuang) {
+  final out = <String>[];
+  var deret = 0, maks = 0;
+  for (final j in jenis) {
+    deret = j == 'PVC' ? deret + 1 : 0;
+    maks = max(maks, deret);
+  }
+  if (maks >= 3) out.add('$maks PVC berturut-turut (dugaan VT)');
+  bool bersih(double a, double b) => !dibuang.any((s) => a < s.selesai && b > s.mulai);
+  final rr = <double>[];
+  for (var i = 1; i < r.length; i++) {
+    final a = r[i - 1] / fs, b = r[i] / fs;
+    if (bersih(a, b)) rr.add(b - a);
+  }
+  final jeda = rr.where((v) => v > 3).length;
+  if (jeda > 0) out.add('Jeda lebih dari 3 detik ($jeda kali)');
+  for (var i = 0; i + 4 < rr.length; i++) {
+    final hr = 60 / (rr.sublist(i, i + 5).reduce((a, b) => a + b) / 5);
+    if (hr > 150) {
+      out.add('Detak sangat cepat (> 150 bpm)');
+      break;
+    }
+  }
+  for (var i = 0; i + 4 < rr.length; i++) {
+    final hr = 60 / (rr.sublist(i, i + 5).reduce((a, b) => a + b) / 5);
+    if (hr < 40) {
+      out.add('Detak sangat lambat (< 40 bpm)');
+      break;
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- analisis
+class HasilAnalisis {
+  final List<double> sinyal; // sesudah filter (dan rekonstruksi bila ada)
+  final List<double> sinyalAsli; // rekaman mentah
+  final double fs;
+  final List<Segmen> artefak;
+  final List<String> tingkat; // per segmen: 'lurus' / 'ringan' / 'parah'
+  final List<String> penanganan; // per segmen, untuk ditampilkan
+  final List<Segmen> dibuang; // segmen yang tidak dihitung
+  final List<int> puncakR;
+  final Statistik stat;
+  final List<String> jenisBeat;
+  final List<String> bahaya;
+  const HasilAnalisis(this.sinyal, this.sinyalAsli, this.fs, this.artefak, this.tingkat, this.penanganan, this.dibuang,
+      this.puncakR, this.stat, this.jenisBeat, this.bahaya);
+  bool get dibersihkan => penanganan.any((p) => p.startsWith('Direkonstruksi'));
+  int hitung(String j) => jenisBeat.where((e) => e == j).length;
+}
+
+/// Alur lengkap:
+/// 1. filter Zaskia (garis dasar lurus, tanpa 50 Hz, halus)
+/// 2. deteksi waktu mulai/selesai artefak pada rekaman mentah
+/// 3. tingkat tiap segmen: lurus / ringan / parah
+/// 4. ringan direkonstruksi decoder CDAE (bila [model] diisi), parah dibuang
+/// 5. Pan-Tompkins di bagian yang dipakai, detak jantung tanpa bagian yang dibuang
+HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = const {}}) {
+  final y = filterZaskia(x, fs);
   final art = deteksiArtefak(x, fs);
-  if (art.isEmpty || model.isEmpty) return analisis(x, fs);
-  final x257 = resample(x, fs, Cdae.fs);
-  final y257 = [...x257];
-  const L = Cdae.jendela;
-  final pilihan = <int, String>{};
+  final tingkat = tingkatArtefak(y, fs, art);
+  final sinyal = [...y];
+  final penanganan = <String>[];
+  final dibuang = <Segmen>[];
+  final perluModel = <int>[];
   for (final (k, s) in art.indexed) {
-    final jenis = pilihModel(x, fs, s, model.keys.toSet());
-    pilihan[k] = jenis;
-    final a = (s.mulai * Cdae.fs).floor(), z = min(x257.length, (s.selesai * Cdae.fs).ceil());
-    // jendela 768 yang menutupi [a, z): satu jendela di tengah, atau beberapa bila segmen panjang
-    final mulai = <int>[];
-    if (z - a <= L - 64) {
-      mulai.add(((a + z) ~/ 2 - L ~/ 2).clamp(0, max(0, x257.length - L)));
+    if (tingkat[k] == 'lurus') {
+      penanganan.add('Diluruskan filter');
+    } else if (tingkat[k] == 'ringan' && model.isNotEmpty) {
+      perluModel.add(k);
+      penanganan.add('');
     } else {
-      for (var m = max(0, a - 32); ; m += L - 128) {
-        final mm = min(m, max(0, x257.length - L));
-        mulai.add(mm);
-        if (mm + L >= min(x257.length, z + 32)) break;
+      penanganan.add('Dibuang');
+      dibuang.add(s);
+    }
+  }
+  if (perluModel.isNotEmpty && x.length >= 3 * fs) {
+    final y257 = resample(y, fs, Cdae.fs);
+    final hasil257 = [...y257];
+    const L = Cdae.jendela;
+    for (final k in perluModel) {
+      final s = art[k];
+      final jenis = pilihModel(x, fs, s, model.keys.toSet());
+      penanganan[k] = 'Direkonstruksi ${jenis.toUpperCase()}';
+      final a = (s.mulai * Cdae.fs).floor(), z = min(y257.length, (s.selesai * Cdae.fs).ceil());
+      final mulai = <int>[];
+      if (z - a <= L - 64) {
+        mulai.add(((a + z) ~/ 2 - L ~/ 2).clamp(0, max(0, y257.length - L)));
+      } else {
+        for (var m = max(0, a - 32);; m += L - 128) {
+          final mm = min(m, max(0, y257.length - L));
+          mulai.add(mm);
+          if (mm + L >= min(y257.length, z + 32)) break;
+        }
+      }
+      for (final m in mulai) {
+        if (m + L > y257.length) continue;
+        final keluar = model[jenis]!.bersihkan(y257.sublist(m, m + L));
+        for (var i = max(a, m + 32); i < min(z, m + L - 32); i++) {
+          hasil257[i] = keluar[i - m];
+        }
       }
     }
-    for (final m in mulai) {
-      if (m + L > x257.length) continue; // rekaman lebih pendek dari 3 detik
-      final keluar = model[jenis]!.bersihkan(x257.sublist(m, m + L));
-      // tulis hanya bagian dalam segmen, abaikan 32 sampel tepi jendela (efek padding)
-      for (var i = max(a, m + 32); i < min(z, m + L - 32); i++) {
-        y257[i] = keluar[i - m];
+    final balik = resample(hasil257, Cdae.fs, fs);
+    for (final k in perluModel) {
+      final s = art[k];
+      for (var i = (s.mulai * fs).round(); i < min(sinyal.length, (s.selesai * fs).round()); i++) {
+        if (i < balik.length) sinyal[i] = balik[i];
+      }
+    }
+  } else {
+    for (final k in perluModel) {
+      penanganan[k] = 'Dibuang';
+      dibuang.add(art[k]);
+    }
+    dibuang.sort((a, b) => a.mulai.compareTo(b.mulai));
+  }
+
+  // Pan-Tompkins terpisah di tiap bagian yang dipakai (>= 1,5 s)
+  final r = <int>[];
+  var awal = 0.0;
+  for (final sg in [...dibuang, Segmen(x.length / fs, x.length / fs)]) {
+    final m = (awal * fs).round(), z = (sg.mulai * fs).round();
+    if (z - m >= 1.5 * fs) {
+      for (final i in panTompkins(sinyal.sublist(m, z), fs)) {
+        if ((m + i) / fs > awal + 0.2 || awal == 0) r.add(m + i); // lewati 0,2 s setelah bagian dibuang
+      }
+    }
+    awal = sg.selesai;
+  }
+  final jenis = klasifikasiBeat(sinyal, fs, r);
+  return HasilAnalisis(sinyal, x, fs, art, tingkat, penanganan, dibuang, r, hitungStatistik(r, fs, dibuang), jenis,
+      aritmiaBerbahaya(r, jenis, fs, dibuang));
+}
+
+// ---------------------------------------------------------------- baca file
+/// Baca CSV satu kolom (amplitudo) atau dua kolom (waktu, amplitudo).
+List<double> bacaCsv(String isi) {
+  final out = <double>[];
+  for (final baris in isi.split(RegExp(r'\r?\n'))) {
+    final kol = baris.split(RegExp(r'[,;\t ]+')).where((s) => s.isNotEmpty).toList();
+    if (kol.isEmpty) continue;
+    final v = double.tryParse(kol.last);
+    if (v != null) out.add(v);
+  }
+  return out;
+}
+
+/// Baca .bin mentah: deretan float32 little-endian, satu lead (mV).
+List<double> bacaBinFloat32(Uint8List b) {
+  final d = ByteData.sublistView(b);
+  return [
+    for (var i = 0; i + 4 <= b.length; i += 4)
+      if (d.getFloat32(i, Endian.little).isFinite) d.getFloat32(i, Endian.little)
+  ];
+}
+
+/// Baca rekaman format PhysioNet (WFDB): isi file .hea dan bytes file .dat.
+/// Mendukung format 16, 212, dan 80. Lead yang dipilih: II atau MLII, selain itu lead pertama.
+/// Mengembalikan (sinyal mV, fs, nama lead).
+(List<double>, double, String) bacaPhysionet(String hea, Uint8List dat) {
+  final baris = hea.split(RegExp(r'\r?\n')).map((e) => e.trim()).where((e) => e.isNotEmpty && !e.startsWith('#')).toList();
+  if (baris.isEmpty) throw 'file .hea kosong';
+  final kepala = baris.first.split(RegExp(r'\s+'));
+  final nsig = int.parse(kepala[1]);
+  final fs = kepala.length > 2 ? double.parse(kepala[2].split('/').first) : 250.0;
+  final sinyal = baris.skip(1).take(nsig).map((e) => e.split(RegExp(r'\s+'))).toList();
+  var lead = sinyal.indexWhere((t) => t.length > 8 && ['II', 'MLII'].contains(t.sublist(8).join(' ')));
+  if (lead < 0) lead = 0;
+  final t = sinyal[lead];
+  final format = int.parse(RegExp(r'^\d+').firstMatch(t[1])!.group(0)!);
+  var gain = 200.0, dasar = 0.0;
+  if (t.length > 2) {
+    final m = RegExp(r'^([\d.eE+-]+)(?:\(([-\d]+)\))?').firstMatch(t[2]);
+    if (m != null) {
+      gain = double.tryParse(m.group(1)!) ?? 200;
+      if (gain == 0) gain = 200;
+      if (m.group(2) != null) {
+        dasar = double.parse(m.group(2)!);
+      } else if (t.length > 4) {
+        dasar = double.tryParse(t[4]) ?? 0;
       }
     }
   }
-  final balik = resample(y257, Cdae.fs, fs);
-  final bersih = [...x];
-  for (final s in art) {
-    for (var i = (s.mulai * fs).round(); i < min(x.length, (s.selesai * fs).round()); i++) {
-      if (i < balik.length) bersih[i] = balik[i];
+  final aliran = <int>[];
+  if (format == 16) {
+    final d = ByteData.sublistView(dat);
+    for (var i = 0; i + 2 <= dat.length; i += 2) {
+      aliran.add(d.getInt16(i, Endian.little));
     }
+  } else if (format == 212) {
+    int tanda(int v) => v >= 2048 ? v - 4096 : v;
+    for (var i = 0; i + 3 <= dat.length; i += 3) {
+      aliran.add(tanda(dat[i] | ((dat[i + 1] & 0x0F) << 8)));
+      aliran.add(tanda(dat[i + 2] | ((dat[i + 1] & 0xF0) << 4)));
+    }
+  } else if (format == 80) {
+    for (final v in dat) {
+      aliran.add(v - 128);
+    }
+  } else {
+    throw 'format $format belum didukung (hanya 16, 212, 80)';
   }
-  final r = panTompkins(bersih, fs);
-  return HasilAnalisis(bersih, fs, art, r, hitungStatistik(r, fs, const []), klasifikasiBeat(bersih, fs, r),
-      sinyalAsli: x, modelPerSegmen: pilihan);
+  final out = <double>[for (var i = lead; i < aliran.length; i += nsig) (aliran[i] - dasar) / gain];
+  final nama = t.length > 8 ? t.sublist(8).join(' ') : 'lead ${lead + 1}';
+  return (out, fs, nama);
+}
+
+/// Simpan sinyal sebagai float32 little-endian (untuk tahap machine learning).
+Uint8List keBinFloat32(List<double> x) {
+  final d = ByteData(x.length * 4);
+  for (var i = 0; i < x.length; i++) {
+    d.setFloat32(i * 4, x[i], Endian.little);
+  }
+  return d.buffer.asUint8List();
 }
