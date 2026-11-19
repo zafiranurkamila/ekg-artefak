@@ -23,12 +23,12 @@ class Statistik {
 
 /// Klasifikasi beat berbasis aturan (penanda awal; klasifikasi aritmia sebenarnya
 /// dikerjakan tahap machine learning). Tiap detak dibandingkan dengan templat
-/// (median semua detak, jendela +-0,2 s):
+/// (median semua detak, jendela QRS +-0,1 s):
 /// - PVC: bentuk berbeda (korelasi < 0,7) dan datang lebih awal atau diikuti jeda panjang.
 /// - PAC: bentuk normal, datang lebih awal (< 85% R-R median), lalu diikuti jeda lebih panjang.
 /// Diuji pada INCART I01: kedua PVC beranotasi (2,76 s dan 10,33 s) terdeteksi.
 List<String> klasifikasiBeat(List<double> y, double fs, List<int> r) {
-  final n = y.length, w = (0.2 * fs).round();
+  final n = y.length, w = (0.1 * fs).round();
   final pakai = [for (final i in r) i - w >= 0 && i + w < n];
   final idx = [for (var k = 0; k < r.length; k++) if (pakai[k]) k];
   if (idx.length < 3 || r.length < 3) return List.filled(r.length, 'N');
@@ -64,7 +64,7 @@ List<String> klasifikasiBeat(List<double> y, double fs, List<int> r) {
         final sebelum = k > 0 ? (r[k] - r[k - 1]) / fs : med;
         final sesudah = k + 1 < r.length ? (r[k + 1] - r[k]) / fs : med;
         final dini = sebelum < 0.85 * med;
-        if (c < 0.7 && (dini || sesudah > 1.15 * med)) return 'PVC';
+        if (c < 0.7 && (dini || sesudah > 1.15 * med || k == r.length - 1)) return 'PVC';
         if (c >= 0.7 && dini && sesudah > 1.1 * sebelum) return 'PAC';
         return 'N';
       }()
@@ -395,11 +395,17 @@ List<String> tingkatArtefak(List<double> y, double fs, List<Segmen> art) {
 // ---------------------------------------------------------------- aritmia berbahaya
 /// Peringatan berbasis aturan dari detak yang terdeteksi. Klasifikasi aritmia yang
 /// sebenarnya dikerjakan tahap machine learning; ini hanya penanda awal.
+/// Detak di dalam segmen artefak (termasuk yang direkonstruksi) tidak dipakai,
+/// supaya noise tidak memicu peringatan.
 List<String> aritmiaBerbahaya(List<int> r, List<String> jenis, double fs, List<Segmen> dibuang) {
   final out = <String>[];
   var deret = 0, maks = 0;
-  for (final j in jenis) {
-    deret = j == 'PVC' ? deret + 1 : 0;
+  for (var k = 0; k < r.length; k++) {
+    if (dibuang.any((s) => s.memuat(r[k] / fs))) {
+      deret = 0;
+      continue;
+    }
+    deret = jenis[k] == 'PVC' ? deret + 1 : 0;
     maks = max(maks, deret);
   }
   if (maks >= 3) out.add('$maks PVC berturut-turut (dugaan VT)');
@@ -528,7 +534,7 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
   }
   final jenis = klasifikasiBeat(sinyal, fs, r);
   return HasilAnalisis(sinyal, x, fs, art, tingkat, penanganan, dibuang, r, hitungStatistik(r, fs, dibuang), jenis,
-      aritmiaBerbahaya(r, jenis, fs, dibuang));
+      aritmiaBerbahaya(r, jenis, fs, art));
 }
 
 // ---------------------------------------------------------------- baca file
