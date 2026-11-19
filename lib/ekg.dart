@@ -366,12 +366,15 @@ List<double> filterZaskia(List<double> x, double fs) {
 // ---------------------------------------------------------------- keparahan
 /// Tingkat tiap segmen artefak, diukur pada sinyal yang sudah difilter:
 /// rasio puncak (persentil 99 |y|) segmen terhadap bagian bersih rekaman.
-/// - 'lurus'  (< 1,0): sudah diluruskan filter (biasanya baseline wander), tetap dihitung
+/// - 'lurus'  (< 1,0 dan tidak lagi terdeteksi setelah filter): sudah diluruskan filter
+///   (biasanya baseline wander), tetap dihitung
 /// - 'ringan' (1,0-1,4): direkonstruksi decoder CDAE bila model aktif, selain itu dibuang
 /// - 'parah'  (>= 1,4): dibuang
 /// Ambang diuji pada INCART + noise NSTDB 0 dB (ringan) dan -6 dB (parah).
 List<String> tingkatArtefak(List<double> y, double fs, List<Segmen> art) {
   if (art.isEmpty) return const [];
+  // artefak yang masih terdeteksi setelah filter (noise frekuensi tinggi tidak hilang oleh filter)
+  final sisa = deteksiArtefak(y, fs);
   double p99(Iterable<double> v) {
     final u = v.map((e) => e.abs()).toList()..sort();
     return u.isEmpty ? 0 : u[(0.99 * (u.length - 1)).round()];
@@ -387,7 +390,9 @@ List<String> tingkatArtefak(List<double> y, double fs, List<Segmen> art) {
       () {
         final a = (s.mulai * fs).round(), z = min(y.length, (s.selesai * fs).round());
         final r = p99(y.sublist(a, max(a + 1, z))) / (acuan + 1e-9);
-        return r < 1.0 ? 'lurus' : (r < 1.4 ? 'ringan' : 'parah');
+        final masihAda = sisa.any((t) => t.mulai < s.selesai && t.selesai > s.mulai);
+        if (r < 1.0 && !masihAda) return 'lurus';
+        return r < 1.4 ? 'ringan' : 'parah';
       }()
   ];
 }
