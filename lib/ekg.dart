@@ -397,6 +397,54 @@ List<String> tingkatArtefak(List<double> y, double fs, List<Segmen> art) {
   ];
 }
 
+// ---------------------------------------------------------------- jenis noise
+/// Jenis noise tiap segmen (bisa lebih dari satu). SEMENTARA, berbasis ciri sinyal,
+/// sampai model klasifikasi jenis noise dari Zaskia dipasang:
+/// - BW (baseline wander): komponen < 0,5 Hz besar, atau segmen sudah diluruskan filter
+/// - MA (otot): energi > 40 Hz minimal 1,6x bagian bersih
+/// - EM (elektroda): energi di pita EKG minimal 1,35x bagian bersih
+/// - Listrik: energi 50 Hz minimal 2x bagian bersih
+/// Diuji pada INCART + NSTDB: MA dan EM umumnya terbaca benar, BW di 0 dB lemah.
+List<List<String>> jenisNoise(List<double> x, List<double> y, double fs, List<Segmen> art, List<String> tingkat) {
+  if (art.isEmpty) return const [];
+  final hp = _majuMundur(x, _biquad('hp', 0.5, 0.7071, fs));
+  final rendah = [for (var i = 0; i < x.length; i++) x[i] - hp[i]];
+  final atas = 40 < 0.45 * fs ? _majuMundur(hp, _biquad('lp', 40, 0.7071, fs)) : hp;
+  final tinggi = [for (var i = 0; i < x.length; i++) hp[i] - atas[i]];
+  final tanpa50 = 50 < 0.45 * fs ? _majuMundur(hp, _biquad('notch', 50, 30, fs)) : hp;
+  final listrik = [for (var i = 0; i < x.length; i++) hp[i] - tanpa50[i]];
+  final bersih = [for (var i = 0; i < x.length; i++) !art.any((s) => s.memuat(i / fs))];
+  double rms(List<double> v, int a, int z, [bool hanyaBersih = false]) {
+    var s = 0.0, c = 0;
+    for (var i = a; i < z; i++) {
+      if (hanyaBersih && !bersih[i]) continue;
+      s += v[i] * v[i];
+      c++;
+    }
+    return c == 0 ? 0 : sqrt(s / c);
+  }
+
+  final n = x.length;
+  final cukup = bersih.where((b) => b).length > fs;
+  final rT = rms(tinggi, 0, n, cukup), rY = rms(y, 0, n, cukup), rL = rms(listrik, 0, n, cukup);
+  final absBersih = [for (var i = 0; i < n; i++) if (!cukup || bersih[i]) y[i].abs()]..sort();
+  final acuan = absBersih.isEmpty ? 1.0 : absBersih[(0.99 * (absBersih.length - 1)).round()];
+  return [
+    for (final (k, s) in art.indexed)
+      () {
+        final a = (s.mulai * fs).round(), z = max(a + 2, min(n, (s.selesai * fs).round()));
+        final l = rendah.sublist(a, z)..sort();
+        final bw = (l[(0.99 * (l.length - 1)).round()] - l[(0.01 * (l.length - 1)).round()]) / (acuan + 1e-9);
+        final j = <String>[];
+        if (bw >= 0.6 || tingkat[k] == 'lurus') j.add('BW');
+        if (rms(tinggi, a, z) >= 1.6 * rT) j.add('MA');
+        if (tingkat[k] != 'lurus' && rms(y, a, z) >= 1.35 * rY) j.add('EM');
+        if (rms(listrik, a, z) >= 2 * rL && rL > 0) j.add('Listrik');
+        return j.isEmpty ? ['Tidak pasti'] : j;
+      }()
+  ];
+}
+
 // ---------------------------------------------------------------- aritmia berbahaya
 /// Peringatan berbasis aturan dari detak yang terdeteksi. Klasifikasi aritmia yang
 /// sebenarnya dikerjakan tahap machine learning; ini hanya penanda awal.
@@ -446,13 +494,14 @@ class HasilAnalisis {
   final double fs;
   final List<Segmen> artefak;
   final List<String> tingkat; // per segmen: 'lurus' / 'ringan' / 'parah'
+  final List<List<String>> jenis; // per segmen: BW / MA / EM / Listrik (sementara, aturan sinyal)
   final List<String> penanganan; // per segmen, untuk ditampilkan
   final List<Segmen> dibuang; // segmen yang tidak dihitung
   final List<int> puncakR;
   final Statistik stat;
   final List<String> jenisBeat;
   final List<String> bahaya;
-  const HasilAnalisis(this.sinyal, this.sinyalAsli, this.fs, this.artefak, this.tingkat, this.penanganan, this.dibuang,
+  const HasilAnalisis(this.sinyal, this.sinyalAsli, this.fs, this.artefak, this.tingkat, this.jenis, this.penanganan, this.dibuang,
       this.puncakR, this.stat, this.jenisBeat, this.bahaya);
   bool get dibersihkan => penanganan.any((p) => p.startsWith('Direkonstruksi'));
   /// Jumlah detak berjenis [j], tanpa detak di dalam segmen artefak.
@@ -472,6 +521,7 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
   final y = filterZaskia(x, fs);
   final art = deteksiArtefak(x, fs);
   final tingkat = tingkatArtefak(y, fs, art);
+  final jenisSeg = jenisNoise(x, y, fs, art, tingkat);
   final sinyal = [...y];
   final penanganan = <String>[];
   final dibuang = <Segmen>[];
@@ -493,7 +543,14 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
     const L = Cdae.jendela;
     for (final k in perluModel) {
       final s = art[k];
-      final jenis = pilihModel(x, fs, s, model.keys.toSet());
+      // decoder dipilih dari jenis noise: MA, lalu EM, lalu BW; bila tidak ada, aturan lama
+      final j = jenisSeg[k];
+      final jenis = [
+            if (j.contains('MA')) 'ma',
+            if (j.contains('EM')) 'em',
+            if (j.contains('BW')) 'bw',
+          ].where(model.containsKey).firstOrNull ??
+          pilihModel(x, fs, s, model.keys.toSet());
       penanganan[k] = 'Direkonstruksi ${jenis.toUpperCase()}';
       final a = (s.mulai * Cdae.fs).floor(), z = min(y257.length, (s.selesai * Cdae.fs).ceil());
       final mulai = <int>[];
@@ -542,7 +599,7 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
     awal = sg.selesai;
   }
   final jenis = klasifikasiBeat(sinyal, fs, r);
-  return HasilAnalisis(sinyal, x, fs, art, tingkat, penanganan, dibuang, r, hitungStatistik(r, fs, dibuang), jenis,
+  return HasilAnalisis(sinyal, x, fs, art, tingkat, jenisSeg, penanganan, dibuang, r, hitungStatistik(r, fs, dibuang), jenis,
       aritmiaBerbahaya(r, jenis, fs, art));
 }
 

@@ -417,16 +417,50 @@ class _LayarState extends State<Layar> {
       if (_h.artefak.isEmpty) const _Baris('Tidak ada artefak', 'Seluruh rekaman dihitung', '-'),
       for (final (i, a) in _h.artefak.indexed)
         _Baris(
-          'Segmen ${i + 1}, ${const {'lurus': 'diluruskan', 'ringan': 'ringan', 'parah': 'parah'}[_h.tingkat[i]]}',
+          'Segmen ${i + 1}: ${_h.jenis[i].join(' + ')}, ${const {'lurus': 'diluruskan', 'ringan': 'ringan', 'parah': 'parah'}[_h.tingkat[i]]}',
           '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik',
           _h.penanganan[i],
           netral: true,
         ),
       const Padding(
         padding: EdgeInsets.fromLTRB(6, 2, 6, 0),
-        child: Text('Sinyal sudah difilter (0,5-40 Hz dan 50 Hz) sehingga garis dasar lurus. Jenis noise akan ditentukan model dari Zaskia.',
+        child: Text('Jenis noise sementara ditentukan dari ciri sinyal, nanti diganti model dari Zaskia.',
             style: TextStyle(color: redup, fontSize: 11.5)),
       ),
+      const SizedBox(height: 26),
+
+      // alur pemrosesan
+      const Text('Alur pemrosesan', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: hijauGelap)),
+      const SizedBox(height: 12),
+      for (final (i, (judul, isi)) in const [
+        ('Sinyal masuk', 'File .bin, PhysioNet .hea + .dat, atau CSV'),
+        ('Filter', 'Band-pass 0,5-40 Hz dan notch 50 Hz, garis dasar jadi lurus'),
+        ('Deteksi artefak', 'Waktu mulai dan selesai tiap segmen noise'),
+        ('Jenis noise', 'BW, MA, EM, atau listrik, bisa lebih dari satu'),
+        ('Penanganan', 'Parah dibuang, ringan direkonstruksi decoder sesuai jenisnya'),
+        ('Deteksi detak', 'Pan-Tompkins, detak jantung tanpa bagian yang dibuang'),
+        ('Tahap berikutnya', 'Sinyal bersih (.bin) masuk machine learning untuk klasifikasi aritmia per detak'),
+      ].indexed)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(
+                width: 28,
+                child: Text('${i + 1}', style: const TextStyle(fontWeight: FontWeight.w800, color: zaitun, fontSize: 15)),
+              ),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(judul, style: const TextStyle(fontWeight: FontWeight.w700, color: hijauGelap)),
+                  const SizedBox(height: 2),
+                  Text(isi, style: const TextStyle(color: redup, fontSize: 12.5, height: 1.35)),
+                ]),
+              ),
+            ]),
+          ),
+        ),
     ]);
   }
 }
