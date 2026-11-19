@@ -46,6 +46,7 @@ class _LayarState extends State<Layar> {
   String _info = '20 detik, 250 Hz';
   final Map<String, Cdae> _model = {};
   bool _pakaiModel = false;
+  bool _lihatMentah = false; // pratinjau: sebelum (mentah) atau sesudah dibersihkan
 
   @override
   void initState() {
@@ -236,6 +237,62 @@ class _LayarState extends State<Layar> {
         ]),
       );
 
+  /// Tahapan seperti di halaman detail rekaman: Rekaman, lalu bagian pembersihan sinyal
+  /// (filter, deteksi artefak, jenis noise, penanganan), lalu Prediksi oleh model ML.
+  Widget _tahapan() {
+    final rekon = _h.penanganan.where((p) => p.startsWith('Direkonstruksi')).length;
+    final buang = _h.penanganan.where((p) => p == 'Dibuang').length;
+    final lurus = _h.penanganan.where((p) => p == 'Diluruskan filter').length;
+    final daftar = [
+      ('Rekaman', '$_nama, $_info', 'Selesai'),
+      ('Filter', 'Band-pass 0,5-40 Hz dan notch 50 Hz, garis dasar lurus', 'Selesai'),
+      ('Deteksi artefak', _h.artefak.isEmpty ? 'Tidak ada segmen noise' : '${_h.artefak.length} segmen noise ditemukan', 'Selesai'),
+      ('Jenis noise', 'Aturan sinyal sementara, menunggu model dari Zaskia', 'Sementara'),
+      (
+        'Penanganan',
+        _h.artefak.isEmpty ? 'Tidak ada yang perlu ditangani' : '$lurus diluruskan, $rekon direkonstruksi, $buang dibuang',
+        'Selesai'
+      ),
+      ('Prediksi aritmia', 'Sinyal bersih diteruskan ke model machine learning', 'Berikutnya'),
+    ];
+    Color warna(String st) => switch (st) {
+          'Selesai' => zaitun,
+          'Sementara' => const Color(0xFFB7791F),
+          _ => redup,
+        };
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Tahapan', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: hijauGelap)),
+        const SizedBox(height: 10),
+        for (final (i, (judul, isi, st)) in daftar.indexed)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              SizedBox(
+                width: 26,
+                child: Text('${i + 1}', style: TextStyle(fontWeight: FontWeight.w800, color: warna(st), fontSize: 14)),
+              ),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text(judul, style: const TextStyle(fontWeight: FontWeight.w700, color: hijauGelap)),
+                  const SizedBox(height: 2),
+                  Text(isi, style: const TextStyle(color: redup, fontSize: 12.5, height: 1.35)),
+                ]),
+              ),
+              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: warna(st).withOpacity(.12), borderRadius: BorderRadius.circular(20)),
+                child: Text(st, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: warna(st))),
+              ),
+            ]),
+          ),
+      ]),
+    );
+  }
+
   Widget _beranda() {
     final s = _h.stat;
     final durasi = _h.sinyal.length / _h.fs;
@@ -328,16 +385,44 @@ class _LayarState extends State<Layar> {
       ],
       const SizedBox(height: 22),
 
-      // grafik
+      // tahapan: posisi bagian ini di antara Rekaman dan Prediksi
+      _tahapan(),
+      const SizedBox(height: 22),
+
+      // pratinjau sinyal sebelum / sesudah
       Container(
         padding: const EdgeInsets.fromLTRB(10, 16, 10, 10),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(28)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Padding(
-            padding: EdgeInsets.only(left: 8, bottom: 10),
-            child: Text('Sinyal EKG', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: hijauGelap)),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 4, bottom: 10),
+            child: Row(children: [
+              const Expanded(
+                child: Text('Pratinjau sinyal', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: hijauGelap)),
+              ),
+              for (final (label, mentah) in const [('Sebelum', true), ('Sesudah', false)])
+                Padding(
+                  padding: const EdgeInsets.only(left: 6),
+                  child: Material(
+                    color: _lihatMentah == mentah ? zaitun : const Color(0xFFF2F5F3),
+                    borderRadius: BorderRadius.circular(20),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () => setState(() => _lihatMentah = mentah),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                        child: Text(label,
+                            style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: _lihatMentah == mentah ? Colors.white : hijauGelap)),
+                      ),
+                    ),
+                  ),
+                ),
+            ]),
           ),
-          AspectRatio(aspectRatio: 1.45, child: CustomPaint(painter: Grafik(_h))),
+          AspectRatio(aspectRatio: 1.45, child: CustomPaint(painter: Grafik(_h, mentah: _lihatMentah))),
         ]),
       ),
       const SizedBox(height: 12),
@@ -428,39 +513,6 @@ class _LayarState extends State<Layar> {
             style: TextStyle(color: redup, fontSize: 11.5)),
       ),
       const SizedBox(height: 26),
-
-      // alur pemrosesan
-      const Text('Alur pemrosesan', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: hijauGelap)),
-      const SizedBox(height: 12),
-      for (final (i, (judul, isi)) in const [
-        ('Sinyal masuk', 'File .bin, PhysioNet .hea + .dat, atau CSV'),
-        ('Filter', 'Band-pass 0,5-40 Hz dan notch 50 Hz, garis dasar jadi lurus'),
-        ('Deteksi artefak', 'Waktu mulai dan selesai tiap segmen noise'),
-        ('Jenis noise', 'BW, MA, EM, atau listrik, bisa lebih dari satu'),
-        ('Penanganan', 'Parah dibuang, ringan direkonstruksi decoder sesuai jenisnya'),
-        ('Deteksi detak', 'Pan-Tompkins, detak jantung tanpa bagian yang dibuang'),
-        ('Tahap berikutnya', 'Sinyal bersih (.bin) masuk machine learning untuk klasifikasi aritmia per detak'),
-      ].indexed)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Container(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              SizedBox(
-                width: 28,
-                child: Text('${i + 1}', style: const TextStyle(fontWeight: FontWeight.w800, color: zaitun, fontSize: 15)),
-              ),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(judul, style: const TextStyle(fontWeight: FontWeight.w700, color: hijauGelap)),
-                  const SizedBox(height: 2),
-                  Text(isi, style: const TextStyle(color: redup, fontSize: 12.5, height: 1.35)),
-                ]),
-              ),
-            ]),
-          ),
-        ),
     ]);
   }
 }
@@ -645,7 +697,8 @@ class _Titik extends StatelessWidget {
 
 class Grafik extends CustomPainter {
   final HasilAnalisis h;
-  Grafik(this.h);
+  final bool mentah; // true: tampilkan rekaman sebelum dibersihkan
+  Grafik(this.h, {this.mentah = false});
 
   // warna mengikuti grafik referensi dari Bapak
   static const merahArea = Color(0xFFF2BDBD), hijauArea = Color(0xFFE8F4E8);
@@ -709,7 +762,11 @@ class Grafik extends CustomPainter {
     final gaya = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.8;
-    if (h.dibersihkan) {
+    final urutAsli = [...h.sinyalAsli]..sort();
+    final asli = [for (final v in h.sinyalAsli) v - urutAsli[urutAsli.length ~/ 2]];
+    if (mentah) {
+      c.drawPath(jalur(asli), gaya..color = Colors.black);
+    } else if (h.dibersihkan) {
       final urut = [...h.sinyalAsli]..sort();
       final tengah = urut[urut.length ~/ 2];
       c.save();
@@ -748,7 +805,7 @@ class Grafik extends CustomPainter {
     final ukuran = kecil ? 3.5 : 5.0;
     for (final (k, i) in h.puncakR.indexed) {
       final j = h.jenisBeat[k];
-      final x = px(i / h.fs), y = py(h.sinyal[i]) - 2;
+      final x = px(i / h.fs), y = py(mentah ? asli[i] : h.sinyal[i]) - 2;
       c.drawPath(
           Path()
             ..moveTo(x - ukuran, y - ukuran * 1.8)
@@ -822,5 +879,5 @@ class Grafik extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant Grafik old) => old.h != h;
+  bool shouldRepaint(covariant Grafik old) => old.h != h || old.mentah != mentah;
 }
