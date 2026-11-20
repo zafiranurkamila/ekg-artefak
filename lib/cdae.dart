@@ -15,17 +15,20 @@ class _Lapis {
 }
 
 class Cdae {
-  static const fs = 257.0, jendela = 768, lead = 12;
+  static const fs = 257.0, jendela = 768;
+  final int lead; // 12 (model lama) atau 1 (model 1 lead), dibaca dari ukuran bobot
   final List<_Lapis?> _lapis; // null = UpSampling x2
 
-  Cdae._(this._lapis);
+  Cdae._(this._lapis, this.lead);
 
   factory Cdae.dariBytes(ByteData data) {
     final w = data.buffer.asFloat32List(data.offsetInBytes, data.lengthInBytes ~/ 4);
     var pos = 0;
-    const spek = [
-      [12, 32, 2, 1, 1], [32, 64, 2, 1, 1], [64, 64, 1, 1, 1], [64, 64, 1, 2, 1], null,
-      [64, 64, 1, 1, 1], null, [64, 32, 1, 1, 1], [32, 12, 1, 1, 0],
+    int ukuran(int l) => 5 * l * 32 + 32 + 2 * (5 * 64 * 64 + 64) + 5 * 32 * 64 + 64 + 5 * 64 * 64 + 64 + 5 * 64 * 32 + 32 + 5 * 32 * l + l;
+    final nl = ukuran(1) == w.length ? 1 : 12;
+    final spek = [
+      [nl, 32, 2, 1, 1], [32, 64, 2, 1, 1], [64, 64, 1, 1, 1], [64, 64, 1, 2, 1], null,
+      [64, 64, 1, 1, 1], null, [64, 32, 1, 1, 1], [32, nl, 1, 1, 0],
     ];
     final lapis = <_Lapis?>[];
     for (final s in spek) {
@@ -41,7 +44,7 @@ class Cdae {
       lapis.add(_Lapis(k, b, s[0], s[1], s[2], s[3], s[4] == 1));
     }
     if (pos != w.length) throw StateError('ukuran bobot tidak cocok ($pos vs ${w.length})');
-    return Cdae._(lapis);
+    return Cdae._(lapis, nl);
   }
 
   /// x: data baris-utama panjang n*kanal. Padding 'same' mengikuti TensorFlow.
