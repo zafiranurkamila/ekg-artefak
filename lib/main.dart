@@ -526,7 +526,7 @@ class _LayarState extends State<Layar> {
         _Baris(
           'Segmen ${i + 1}: ${_jenisTeks(i)}, ${const {'lurus': 'diluruskan', 'ringan': 'ringan', 'parah': 'parah'}[_h.tingkat[i]]}',
           '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik'
-              '${i < _h.snrSegmen.length && _h.snrSegmen[i] < 90 ? ' · SNR ${_h.snrSegmen[i].toStringAsFixed(1)} dB' : ''}',
+              '${i < _h.snrSegmen.length && _h.snrSegmen[i] < 90 ? ', SNR ${_h.snrSegmen[i].toStringAsFixed(1).replaceAll('.', ',')} dB' : ''}',
           _h.penanganan[i],
           netral: true,
         ),
