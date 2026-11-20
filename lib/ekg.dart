@@ -499,10 +499,11 @@ class HasilAnalisis {
   final List<Segmen> dibuang; // segmen yang tidak dihitung
   final List<int> puncakR;
   final Statistik stat;
+  final Statistik statSebelum; // detak dari seluruh rekaman, artefak ikut dihitung (60/T semua interval)
   final List<String> jenisBeat;
   final List<String> bahaya;
   const HasilAnalisis(this.sinyal, this.sinyalAsli, this.fs, this.artefak, this.tingkat, this.jenis, this.penanganan, this.dibuang,
-      this.puncakR, this.stat, this.jenisBeat, this.bahaya);
+      this.puncakR, this.stat, this.jenisBeat, this.bahaya, this.statSebelum);
   bool get dibersihkan => penanganan.any((p) => p.startsWith('Direkonstruksi'));
   /// Jumlah detak berjenis [j], tanpa detak di dalam segmen artefak.
   int hitung(String j) => [
@@ -600,7 +601,7 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
   }
   final jenis = klasifikasiBeat(sinyal, fs, r);
   return HasilAnalisis(sinyal, x, fs, art, tingkat, jenisSeg, penanganan, dibuang, r, hitungStatistik(r, fs, dibuang), jenis,
-      aritmiaBerbahaya(r, jenis, fs, art));
+      aritmiaBerbahaya(r, jenis, fs, art), hitungStatistik(panTompkins(y, fs), fs, const []));
 }
 
 // ---------------------------------------------------------------- baca file

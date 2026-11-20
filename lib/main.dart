@@ -294,7 +294,8 @@ class _LayarState extends State<Layar> {
   }
 
   Widget _beranda() {
-    final s = _h.stat;
+    // Sebelum: artefak ikut dihitung; Sesudah: segmen artefak dibuang
+    final s = _lihatMentah ? _h.statSebelum : _h.stat;
     final durasi = _h.sinyal.length / _h.fs;
     final durArt = _h.dibuang.fold(0.0, (a, g) => a + g.selesai - g.mulai);
     final persenBersih = durasi == 0 ? 0.0 : (1 - durArt / durasi).clamp(0.0, 1.0);
