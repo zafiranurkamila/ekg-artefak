@@ -186,9 +186,9 @@ class _LayarState extends State<Layar> {
     }
   }
 
+  Future<double?> _tanyaFs(String namaFile) {
     // alat CardioSense: single lead, sekitar 267 Hz
     final c = TextEditingController(text: '267');
-    final c = TextEditingController(text: '267') // alat CardioSense: single lead, sekitar 267 Hz;
     return showModalBottomSheet<double>(
       context: context,
       isScrollControlled: true,
