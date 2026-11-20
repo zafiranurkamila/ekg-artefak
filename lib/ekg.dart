@@ -398,8 +398,63 @@ List<String> tingkatArtefak(List<double> y, double fs, List<Segmen> art) {
 }
 
 // ---------------------------------------------------------------- jenis noise
-/// Jenis noise tiap segmen (bisa lebih dari satu). SEMENTARA, berbasis ciri sinyal,
-/// sampai model klasifikasi jenis noise dari Zaskia dipasang:
+/// Posisi awal jendela [L] sampel yang menutupi rentang [a, z) pada sinyal sepanjang [n].
+List<int> _jendelaSegmen(int a, int z, int n, int L) {
+  if (n < L) return const [];
+  final mulai = <int>[];
+  if (z - a <= L - 64) {
+    mulai.add(((a + z) ~/ 2 - L ~/ 2).clamp(0, n - L));
+  } else {
+    for (var m = max(0, a - 32);; m += L - 128) {
+      final mm = min(m, n - L);
+      mulai.add(mm);
+      if (mm + L >= min(n, z + 32)) break;
+    }
+  }
+  return mulai;
+}
+
+/// Jenis noise tiap segmen dari model multitask (kepala klasifikasi MTB-CDAE).
+/// Masukan model = rekaman mentah tanpa noise listrik 50 Hz (BW/MA/EM tidak boleh
+/// ikut terbuang filter 0,5-40 Hz), di-resample ke 257 Hz, jendela 768 sampel
+/// dikurangi mediannya. Peluang [BW, MA, EM] dirata-rata atas jendela yang menutupi segmen.
+/// Label: kelas teratas, ditambah kelas lain yang peluangnya >= 0,3 (noise campuran).
+(List<List<String>>, List<List<double>>) jenisNoiseModel(List<double> x, double fs, List<Segmen> art, Mtb mtb) {
+  if (art.isEmpty) return (const [], const []);
+  final v = 50 < 0.45 * fs ? _majuMundur(x, _biquad('notch', 50, 30, fs)) : x;
+  final x257 = resample(v, fs, Cdae.fs);
+  const L = Cdae.jendela;
+  final label = <List<String>>[], peluang = <List<double>>[];
+  for (final s in art) {
+    final a = (s.mulai * Cdae.fs).floor(), z = min(x257.length, (s.selesai * Cdae.fs).ceil());
+    final p = [0.0, 0.0, 0.0];
+    var k = 0;
+    for (final m in _jendelaSegmen(a, z, x257.length, L)) {
+      final w = x257.sublist(m, m + L);
+      final med = ([...w]..sort())[L ~/ 2];
+      final q = mtb.klasifikasi([for (final e in w) e - med]);
+      for (var c = 0; c < 3; c++) {
+        p[c] += q[c];
+      }
+      k++;
+    }
+    if (k == 0) {
+      label.add(const ['Tidak pasti']);
+      peluang.add(const []);
+      continue;
+    }
+    for (var c = 0; c < 3; c++) {
+      p[c] /= k;
+    }
+    final urut = [0, 1, 2]..sort((i, j) => p[j].compareTo(p[i]));
+    label.add([for (final (r, c) in urut.indexed) if (r == 0 || p[c] >= 0.3) Mtb.kelas[c]]);
+    peluang.add(p);
+  }
+  return (label, peluang);
+}
+
+/// Jenis noise berbasis aturan ciri sinyal. Hanya cadangan bila model multitask
+/// (assets/model/mtb.bin) gagal dimuat:
 /// - BW (baseline wander): komponen < 0,5 Hz besar, atau segmen sudah diluruskan filter
 /// - MA (otot): energi > 40 Hz minimal 1,6x bagian bersih
 /// - EM (elektroda): energi di pita EKG minimal 1,35x bagian bersih
@@ -494,7 +549,8 @@ class HasilAnalisis {
   final double fs;
   final List<Segmen> artefak;
   final List<String> tingkat; // per segmen: 'lurus' / 'ringan' / 'parah'
-  final List<List<String>> jenis; // per segmen: BW / MA / EM / Listrik (sementara, aturan sinyal)
+  final List<List<String>> jenis; // per segmen: BW / MA / EM (model multitask) atau aturan cadangan
+  final List<List<double>> peluangJenis; // per segmen: peluang [BW, MA, EM] dari model; kosong bila aturan
   final List<String> penanganan; // per segmen, untuk ditampilkan
   final List<Segmen> dibuang; // segmen yang tidak dihitung
   final List<int> puncakR;
@@ -503,7 +559,8 @@ class HasilAnalisis {
   final List<String> jenisBeat;
   final List<String> bahaya;
   const HasilAnalisis(this.sinyal, this.sinyalAsli, this.fs, this.artefak, this.tingkat, this.jenis, this.penanganan, this.dibuang,
-      this.puncakR, this.stat, this.jenisBeat, this.bahaya, this.statSebelum);
+      this.puncakR, this.stat, this.jenisBeat, this.bahaya, this.statSebelum, [this.peluangJenis = const []]);
+  bool get jenisDariModel => peluangJenis.isNotEmpty;
   bool get dibersihkan => penanganan.any((p) => p.startsWith('Direkonstruksi'));
   /// Jumlah detak berjenis [j], tanpa detak di dalam segmen artefak.
   int hitung(String j) => [
@@ -515,14 +572,16 @@ class HasilAnalisis {
 /// Alur lengkap:
 /// 1. filter Zaskia (garis dasar lurus, tanpa 50 Hz, halus)
 /// 2. deteksi waktu mulai/selesai artefak pada rekaman mentah
-/// 3. tingkat tiap segmen: lurus / ringan / parah
+/// 3. tingkat tiap segmen: lurus / ringan / parah, jenis noise dari model multitask [mtb]
 /// 4. ringan direkonstruksi decoder CDAE (bila [model] diisi), parah dibuang
 /// 5. Pan-Tompkins di bagian yang dipakai, detak jantung tanpa bagian yang dibuang
-HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = const {}}) {
+HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = const {}, Mtb? mtb}) {
   final y = filterZaskia(x, fs);
   final art = deteksiArtefak(x, fs);
   final tingkat = tingkatArtefak(y, fs, art);
-  final jenisSeg = jenisNoise(x, y, fs, art, tingkat);
+  final (jenisSeg, peluangSeg) = mtb != null && x.length >= Cdae.jendela * fs / Cdae.fs
+      ? jenisNoiseModel(x, fs, art, mtb)
+      : (jenisNoise(x, y, fs, art, tingkat), const <List<double>>[]);
   final sinyal = [...y];
   final penanganan = <String>[];
   final dibuang = <Segmen>[];
@@ -544,27 +603,16 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
     const L = Cdae.jendela;
     for (final k in perluModel) {
       final s = art[k];
-      // decoder dipilih dari jenis noise: MA, lalu EM, lalu BW; bila tidak ada, aturan lama
-      final j = jenisSeg[k];
+      // decoder dipilih dari jenis noise (urutan label: peluang model tertinggi lebih dulu);
+      // bila tidak ada yang cocok, aturan lama
       final jenis = [
-            if (j.contains('MA')) 'ma',
-            if (j.contains('EM')) 'em',
-            if (j.contains('BW')) 'bw',
+            for (final e in jenisSeg[k])
+              if (const {'MA', 'EM', 'BW'}.contains(e)) e.toLowerCase(),
           ].where(model.containsKey).firstOrNull ??
           pilihModel(x, fs, s, model.keys.toSet());
       penanganan[k] = 'Direkonstruksi ${jenis.toUpperCase()}';
       final a = (s.mulai * Cdae.fs).floor(), z = min(y257.length, (s.selesai * Cdae.fs).ceil());
-      final mulai = <int>[];
-      if (z - a <= L - 64) {
-        mulai.add(((a + z) ~/ 2 - L ~/ 2).clamp(0, max(0, y257.length - L)));
-      } else {
-        for (var m = max(0, a - 32);; m += L - 128) {
-          final mm = min(m, max(0, y257.length - L));
-          mulai.add(mm);
-          if (mm + L >= min(y257.length, z + 32)) break;
-        }
-      }
-      for (final m in mulai) {
+      for (final m in _jendelaSegmen(a, z, y257.length, L)) {
         if (m + L > y257.length) continue;
         final keluar = model[jenis]!.bersihkan(y257.sublist(m, m + L));
         for (var i = max(a, m + 32); i < min(z, m + L - 32); i++) {
@@ -617,7 +665,7 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
   }
   final jenis = klasifikasiBeat(sinyal, fs, r);
   return HasilAnalisis(sinyal, x, fs, art, tingkat, jenisSeg, penanganan, dibuang, r, hitungStatistik(r, fs, dibuang), jenis,
-      aritmiaBerbahaya(r, jenis, fs, art), hitungStatistik(panTompkins(y, fs), fs, const []));
+      aritmiaBerbahaya(r, jenis, fs, art), hitungStatistik(panTompkins(y, fs), fs, const []), peluangSeg);
 }
 
 // ---------------------------------------------------------------- baca file

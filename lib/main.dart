@@ -45,6 +45,7 @@ class _LayarState extends State<Layar> {
   String _nama = 'Sinyal buatan';
   String _info = '20 detik, 250 Hz';
   final Map<String, Cdae> _model = {};
+  Mtb? _mtb; // model multitask: klasifikasi jenis noise
   bool _pakaiModel = false;
   bool _lihatMentah = false; // pratinjau: sebelum (mentah) atau sesudah dibersihkan
 
@@ -61,10 +62,21 @@ class _LayarState extends State<Layar> {
         _model[j] = Cdae.dariBytes(await rootBundle.load('assets/model/$j.bin'));
       } catch (_) {} // model yang belum ada dilewati
     }
-    if (mounted) setState(() {});
+    try {
+      _mtb = Mtb.dariBytes(await rootBundle.load('assets/model/mtb.bin'));
+    } catch (_) {} // tanpa mtb.bin, jenis noise memakai aturan cadangan
+    if (mounted) setState(_hitung);
   }
 
-  void _hitung() => _h = analisis(_x, _fs, model: _pakaiModel ? _model : const {});
+  void _hitung() => _h = analisis(_x, _fs, model: _pakaiModel ? _model : const {}, mtb: _mtb);
+
+  /// Label jenis noise segmen [i]; bila dari model, disertai peluangnya.
+  String _jenisTeks(int i) {
+    final j = _h.jenis[i];
+    if (!_h.jenisDariModel || _h.peluangJenis[i].isEmpty) return j.join(' + ');
+    final p = _h.peluangJenis[i];
+    return j.map((e) => '$e ${(p[Mtb.kelas.indexOf(e)] * 100).round()}%').join(' + ');
+  }
 
   /// Rekaman panjang dipotong 60 detik pertama supaya tetap ringan di HP.
   (List<double>, String) _potong(List<double> x, double fs) {
@@ -504,15 +516,18 @@ class _LayarState extends State<Layar> {
       if (_h.artefak.isEmpty) const _Baris('Tidak ada artefak', 'Seluruh rekaman dihitung', '-'),
       for (final (i, a) in _h.artefak.indexed)
         _Baris(
-          'Segmen ${i + 1}: ${_h.jenis[i].join(' + ')}, ${const {'lurus': 'diluruskan', 'ringan': 'ringan', 'parah': 'parah'}[_h.tingkat[i]]}',
+          'Segmen ${i + 1}: ${_jenisTeks(i)}, ${const {'lurus': 'diluruskan', 'ringan': 'ringan', 'parah': 'parah'}[_h.tingkat[i]]}',
           '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik',
           _h.penanganan[i],
           netral: true,
         ),
-      const Padding(
-        padding: EdgeInsets.fromLTRB(6, 2, 6, 0),
-        child: Text('Jenis noise sementara ditentukan dari ciri sinyal, nanti diganti model dari Zaskia.',
-            style: TextStyle(color: redup, fontSize: 11.5)),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
+        child: Text(
+            _h.jenisDariModel
+                ? 'Jenis noise dari model multitask (MTB-CDAE 1 lead): BW = baseline wander, MA = otot, EM = elektroda/gerak. Persen = peluang model.'
+                : 'Model jenis noise belum termuat; jenis noise sementara ditentukan dari ciri sinyal.',
+            style: const TextStyle(color: redup, fontSize: 11.5)),
       ),
       const SizedBox(height: 26),
     ]);

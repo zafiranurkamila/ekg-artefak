@@ -7,6 +7,8 @@ import h5py, numpy as np
 LAPIS = ["conv1d"] + [f"conv1d_{i}" for i in range(1, 7)]
 for path in sorted(glob.glob("model/*_cdae_seed42_best.keras")):
     jenis = os.path.basename(path).split("_")[0]
+    if jenis == "mtb":          # model multitask diekspor oleh tools/mtb_numpy.py (urutan bobot lain)
+        continue
     f = h5py.File(io.BytesIO(zipfile.ZipFile(path).read("model.weights.h5")), "r")
     bagian = []
     for l in LAPIS:

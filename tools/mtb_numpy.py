@@ -25,7 +25,8 @@ def conv(x, k, b, s=1, d=1, relu=True):
 
 def jalankan(w, sinyal):
     skala = np.percentile(np.abs(sinyal), 99.5) + 1e-8
-    x = np.repeat((sinyal / skala)[:, None], 12, 1).astype(np.float32)
+    nl = w["conv1d"][0].shape[1]                      # 1 (model 1 lead) atau 12 (model lama)
+    x = np.repeat((sinyal / skala)[:, None], nl, 1).astype(np.float32)
     x = conv(x, *w["conv1d"], s=2); x = conv(x, *w["conv1d_1"], s=2)
     x = conv(x, *w["conv1d_2"]); z = conv(x, *w["conv1d_3"], d=2)
     c = np.concatenate([z.mean(0), z.max(0)])
