@@ -599,6 +599,22 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
     }
     awal = sg.selesai;
   }
+  // buang puncak sisipan palsu: terjepit di antara dua detak (kedua jarak < 0,6x R-R median)
+  // dan jumlah kedua jaraknya ~1x median. PVC asli tidak begitu karena diikuti jeda kompensasi.
+  while (r.length >= 4) {
+    final rr = [for (var k = 1; k < r.length; k++) (r[k] - r[k - 1]) / fs]..sort();
+    final med = rr[rr.length ~/ 2];
+    int? buang;
+    for (var k = 1; k < r.length - 1; k++) {
+      final a = (r[k] - r[k - 1]) / fs, b = (r[k + 1] - r[k]) / fs;
+      if (max(a, b) < 0.6 * med && a + b >= 0.8 * med && a + b <= 1.25 * med) {
+        buang = k;
+        break;
+      }
+    }
+    if (buang == null) break;
+    r.removeAt(buang);
+  }
   final jenis = klasifikasiBeat(sinyal, fs, r);
   return HasilAnalisis(sinyal, x, fs, art, tingkat, jenisSeg, penanganan, dibuang, r, hitungStatistik(r, fs, dibuang), jenis,
       aritmiaBerbahaya(r, jenis, fs, art), hitungStatistik(panTompkins(y, fs), fs, const []));
