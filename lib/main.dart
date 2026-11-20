@@ -462,7 +462,7 @@ class _LayarState extends State<Layar> {
                   _model.isEmpty
                       ? 'Memuat model...'
                       : (_pakaiModel
-                          ? 'Ringan direkonstruksi decoder CDAE, parah dibuang'
+                          ? 'Ringan (SNR ≥ 0 dB) direkonstruksi CDAE, parah (SNR < 0 dB) dibuang'
                           : 'Semua artefak yang tersisa setelah filter dibuang'),
                   style: const TextStyle(color: redup, fontSize: 12)),
             ]),
@@ -525,7 +525,8 @@ class _LayarState extends State<Layar> {
       for (final (i, a) in _h.artefak.indexed)
         _Baris(
           'Segmen ${i + 1}: ${_jenisTeks(i)}, ${const {'lurus': 'diluruskan', 'ringan': 'ringan', 'parah': 'parah'}[_h.tingkat[i]]}',
-          '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik',
+          '${a.mulai.toStringAsFixed(2)} – ${a.selesai.toStringAsFixed(2)} detik'
+              '${i < _h.snrSegmen.length && _h.snrSegmen[i] < 90 ? ' · SNR ${_h.snrSegmen[i].toStringAsFixed(1)} dB' : ''}',
           _h.penanganan[i],
           netral: true,
         ),
@@ -838,7 +839,9 @@ class Grafik extends CustomPainter {
             ..lineTo(x, y)
             ..close(),
           Paint()..color = biruR);
-      if (j != 'N') _teks(c, j, Offset(x, y - ukuran * 1.8 - 11), kecil ? 7 : 9, Colors.black, bold: true, tengah: true);
+      if (j != 'N' && !h.artefak.any((s) => s.memuat(i / h.fs))) {
+        _teks(c, j, Offset(x, y - ukuran * 1.8 - 11), kecil ? 7 : 9, Colors.black, bold: true, tengah: true);
+      }
     }
 
     // bingkai dan sumbu

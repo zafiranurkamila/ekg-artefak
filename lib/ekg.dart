@@ -363,36 +363,43 @@ List<double> filterZaskia(List<double> x, double fs) {
   return [for (final e in y) e - tengah];
 }
 
-// ---------------------------------------------------------------- keparahan
-/// Tingkat tiap segmen artefak, diukur pada sinyal yang sudah difilter:
-/// rasio puncak (persentil 99 |y|) segmen terhadap bagian bersih rekaman.
-/// - 'lurus'  (< 1,0 dan tidak lagi terdeteksi setelah filter): sudah diluruskan filter
-///   (biasanya baseline wander), tetap dihitung
-/// - 'ringan' (1,0-1,4): direkonstruksi decoder CDAE bila model aktif, selain itu dibuang
-/// - 'parah'  (>= 1,4): dibuang
-/// Ambang diuji pada INCART + noise NSTDB 0 dB (ringan) dan -6 dB (parah).
-List<String> tingkatArtefak(List<double> y, double fs, List<Segmen> art) {
+// ---------------------------------------------------------------- keparahan (berbasis SNR)
+/// Estimasi SNR (dB) tiap segmen artefak pada sinyal yang sudah difilter [y],
+/// membandingkan daya rata-rata segmen ($P_{seg}$) terhadap daya bagian bersih ($P_{sig}$):
+/// $P_{noise} \approx \max(P_{seg} - P_{sig}, 0)$, sehingga $\text{SNR} = 10 \log_{10}(P_{sig} / P_{noise})$.
+List<double> estimasiSnrDb(List<double> y, double fs, List<Segmen> art) {
   if (art.isEmpty) return const [];
-  // artefak yang masih terdeteksi setelah filter (noise frekuensi tinggi tidak hilang oleh filter)
-  final sisa = deteksiArtefak(y, fs);
-  double p99(Iterable<double> v) {
-    final u = v.map((e) => e.abs()).toList()..sort();
-    return u.isEmpty ? 0 : u[(0.99 * (u.length - 1)).round()];
-  }
-
-  final bersih = <double>[];
-  for (var i = 0; i < y.length; i++) {
-    if (!art.any((s) => s.memuat(i / fs))) bersih.add(y[i]);
-  }
-  final acuan = bersih.length > fs ? p99(bersih) : p99(y);
+  double ms(List<double> v) => v.isEmpty ? 0 : v.map((e) => e * e).reduce((a, b) => a + b) / v.length;
+  final bersih = <double>[
+    for (var i = 0; i < y.length; i++)
+      if (!art.any((s) => s.memuat(i / fs))) y[i]
+  ];
+  final pSig = max(1e-12, ms(bersih.length > fs ? bersih : y));
   return [
     for (final s in art)
       () {
         final a = (s.mulai * fs).round(), z = min(y.length, (s.selesai * fs).round());
-        final r = p99(y.sublist(a, max(a + 1, z))) / (acuan + 1e-9);
+        final pSeg = ms(y.sublist(a, max(a + 1, z)));
+        final pNoise = pSeg - pSig;
+        return pNoise <= 1e-9 ? 99.0 : 10 * log(pSig / pNoise) / ln10;
+      }()
+  ];
+}
+
+/// Tingkat tiap segmen artefak berdasarkan estimasi SNR (dB) pada sinyal terfilter:
+/// - 'lurus'  (SNR >= 0 dB dan tidak lagi terdeteksi setelah filter): sudah diluruskan filter, tetap dihitung
+/// - 'ringan' (SNR >= 0 dB): dalam rentang latih CDAE (0-10 dB); direkonstruksi bila model aktif, selain itu dibuang
+/// - 'parah'  (SNR < 0 dB): noise lebih kuat dari sinyal (di luar rentang CDAE), dibuang
+List<String> tingkatArtefak(List<double> y, double fs, List<Segmen> art, [List<double>? snrList]) {
+  if (art.isEmpty) return const [];
+  final sisa = deteksiArtefak(y, fs);
+  final snr = snrList ?? estimasiSnrDb(y, fs, art);
+  return [
+    for (final (k, s) in art.indexed)
+      () {
         final masihAda = sisa.any((t) => t.mulai < s.selesai && t.selesai > s.mulai);
-        if (r < 1.0 && !masihAda) return 'lurus';
-        return r < 1.4 ? 'ringan' : 'parah';
+        if (snr[k] >= 0 && !masihAda) return 'lurus';
+        return snr[k] >= 0 ? 'ringan' : 'parah';
       }()
   ];
 }
@@ -551,6 +558,7 @@ class HasilAnalisis {
   final List<String> tingkat; // per segmen: 'lurus' / 'ringan' / 'parah'
   final List<List<String>> jenis; // per segmen: BW / MA / EM (model multitask) atau aturan cadangan
   final List<List<double>> peluangJenis; // per segmen: peluang [BW, MA, EM] dari model; kosong bila aturan
+  final List<double> snrSegmen; // per segmen: estimasi SNR (dB) pada sinyal terfilter
   final List<String> penanganan; // per segmen, untuk ditampilkan
   final List<Segmen> dibuang; // segmen yang tidak dihitung
   final List<int> puncakR;
@@ -559,7 +567,8 @@ class HasilAnalisis {
   final List<String> jenisBeat;
   final List<String> bahaya;
   const HasilAnalisis(this.sinyal, this.sinyalAsli, this.fs, this.artefak, this.tingkat, this.jenis, this.penanganan, this.dibuang,
-      this.puncakR, this.stat, this.jenisBeat, this.bahaya, this.statSebelum, [this.peluangJenis = const []]);
+      this.puncakR, this.stat, this.jenisBeat, this.bahaya, this.statSebelum,
+      [this.peluangJenis = const [], this.snrSegmen = const []]);
   bool get jenisDariModel => peluangJenis.isNotEmpty;
   bool get dibersihkan => penanganan.any((p) => p.startsWith('Direkonstruksi'));
   /// Jumlah detak berjenis [j], tanpa detak di dalam segmen artefak.
@@ -578,7 +587,8 @@ class HasilAnalisis {
 HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = const {}, Mtb? mtb}) {
   final y = filterZaskia(x, fs);
   final art = deteksiArtefak(x, fs);
-  final tingkat = tingkatArtefak(y, fs, art);
+  final snr = estimasiSnrDb(y, fs, art);
+  final tingkat = tingkatArtefak(y, fs, art, snr);
   final (jenisSeg, peluangSeg) = mtb != null && x.length >= Cdae.jendela * fs / Cdae.fs
       ? jenisNoiseModel(x, fs, art, mtb)
       : (jenisNoise(x, y, fs, art, tingkat), const <List<double>>[]);
@@ -665,7 +675,7 @@ HasilAnalisis analisis(List<double> x, double fs, {Map<String, Cdae> model = con
   }
   final jenis = klasifikasiBeat(sinyal, fs, r);
   return HasilAnalisis(sinyal, x, fs, art, tingkat, jenisSeg, penanganan, dibuang, r, hitungStatistik(r, fs, dibuang), jenis,
-      aritmiaBerbahaya(r, jenis, fs, art), hitungStatistik(panTompkins(y, fs), fs, const []), peluangSeg);
+      aritmiaBerbahaya(r, jenis, fs, art), hitungStatistik(panTompkins(y, fs), fs, const []), peluangSeg, snr);
 }
 
 // ---------------------------------------------------------------- baca file
