@@ -260,7 +260,15 @@ class _LayarState extends State<Layar> {
       ('Rekaman', '$_nama, $_info', 'Selesai'),
       ('Filter', 'Band-pass 0,5-40 Hz dan notch 50 Hz, garis dasar lurus', 'Selesai'),
       ('Deteksi artefak', _h.artefak.isEmpty ? 'Tidak ada segmen noise' : '${_h.artefak.length} segmen noise ditemukan', 'Selesai'),
-      ('Jenis noise', 'Aturan sinyal sementara, menunggu model dari Zaskia', 'Sementara'),
+      (
+        'Jenis noise',
+        _h.jenisDariModel
+            ? 'Model multitask MTB-CDAE 1 lead (${_h.jenis.map((e) => e.first).toSet().join(', ')})'
+            : _mtb != null
+                ? 'Model multitask MTB-CDAE 1 lead siap'
+                : 'Aturan sinyal sementara (model belum termuat)',
+        _h.jenisDariModel || _mtb != null ? 'Selesai' : 'Sementara'
+      ),
       (
         'Penanganan',
         _h.artefak.isEmpty ? 'Tidak ada yang perlu ditangani' : '$lurus diluruskan, $rekon direkonstruksi, $buang dibuang',
